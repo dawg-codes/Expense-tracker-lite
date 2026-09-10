@@ -1,10 +1,9 @@
 import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.your.domain.expensetracker', // Replace with your actual bundle ID
+  appId: 'YOUR_EXISTING_APP_ID_HERE', // Keep whatever appId is already here
   appName: 'Expense Tracker Lite',
-  webDir: 'www', 
-  bundledWebRuntime: false,
+  webDir: 'dist',
   plugins: {
     SMSInboxReader: {
       android: {
