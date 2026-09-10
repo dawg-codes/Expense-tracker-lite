@@ -1,5 +1,12 @@
 import { useState } from 'react';
-import { SMSInboxReader } from '@solimanware/capacitor-sms-reader';
+// 1. Wildcard import bypasses the strict static export error
+import * as SMSReaderPlugin from '@solimanware/capacitor-sms-reader';
+
+// 2. Safely grab the plugin regardless of whether it's named SmsInboxReader, SMSInboxReader, or default
+const SMSInboxReader: any = 
+  (SMSReaderPlugin as any).SMSInboxReader || 
+  (SMSReaderPlugin as any).SmsInboxReader || 
+  (SMSReaderPlugin as any).default;
 
 interface CashflowStats {
   dailyExp: number;
@@ -43,7 +50,6 @@ export default function App() {
     let monthlyInc = 0, yearlyInc = 0;
     const capturedTransactions: Transaction[] = [];
 
-    // Added 'received' to the credit intent check
     const debitKeywords = /(debited|spent|paid|withdrawn|payment|sent)/i;
     const creditKeywords = /(credited|refunded|reversed|received)/i;
     const amountRegex = /(?:rs\.?|inr)\s*([\d,]+\.?\d*)/i;
@@ -57,13 +63,11 @@ export default function App() {
     smsList.forEach(sms => {
       const lowerText = sms.body.toLowerCase();
       
-      // Ignore OTPs completely
       if (lowerText.includes('otp')) return;
 
       const isDebit = debitKeywords.test(lowerText);
       const isCredit = creditKeywords.test(lowerText);
 
-      // If it's neither (or somehow both), skip it
       if ((!isDebit && !isCredit) || (isDebit && isCredit)) return;
 
       const match = lowerText.match(amountRegex);
@@ -104,6 +108,11 @@ export default function App() {
     setError('');
     
     try {
+      // Safety check in case the native plugin didn't load properly
+      if (!SMSInboxReader) {
+        throw new Error("SMS Plugin not loaded correctly. Please restart the app.");
+      }
+
       const status = await SMSInboxReader.checkPermissions();
       if (status.messages !== 'granted') {
         await SMSInboxReader.requestPermissions();
