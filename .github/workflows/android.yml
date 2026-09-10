@@ -27,15 +27,9 @@ jobs:
     - name: Initialize Android Platform
       run: npx cap add android
 
-    - name: Inject SMS Permissions and Plugin Registration
+    - name: Inject SMS Permissions
       run: |
-        # Inject SMS Permissions into AndroidManifest.xml
         sed -i 's|</manifest>|    <uses-permission android:name="android.permission.READ_SMS" />\n    <uses-permission android:name="android.permission.READ_PHONE_STATE" />\n</manifest>|' android/app/src/main/AndroidManifest.xml
-
-        # Register SMSInboxReaderPlugin in MainActivity.java
-        MAIN_ACTIVITY=$(find android/app/src/main/java -name "MainActivity.java")
-        sed -i 's|import com.getcapacitor.BridgeActivity;|import com.getcapacitor.BridgeActivity;\nimport android.os.Bundle;\nimport com.capacitor.sms.reader.SMSInboxReaderPlugin;|' "$MAIN_ACTIVITY"
-        sed -i 's|public class MainActivity extends BridgeActivity {}|public class MainActivity extends BridgeActivity {\n    @Override\n    public void onCreate(Bundle savedInstanceState) {\n        registerPlugin(SMSInboxReaderPlugin.class);\n        super.onCreate(savedInstanceState);\n    }\n}|' "$MAIN_ACTIVITY"
 
     - name: Sync Capacitor
       run: npx cap sync android
