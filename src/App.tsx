@@ -29,17 +29,29 @@ export default function App() {
     messages.forEach((sms) => {
       const body = (sms.body || '').toLowerCase();
       
-      // Skip balance check texts to prevent inflating amounts
-      if (body.includes('avl bal') || body.includes('available balance')) return;
+      // Skip balance check texts and non-transactional messages
+      if (body.includes('avl bal') || body.includes('available balance') || body.includes('otp')) return;
+
+      // Ensure the message is strictly a transaction notification
+      const isDebit = body.includes('debited') || body.includes('spent') || body.includes('paid') || body.includes('sent') || body.includes('dr');
+      const isCredit = body.includes('credited') || body.includes('received') || body.includes('deposited') || body.includes('cr');
+
+      if (!isDebit && !isCredit) return;
 
       // Extract amount following currency keywords
       const match = body.match(/(?:rs\.?|inr|₹)\s*([\d,]+\.?\d*)/i);
       if (match && match[1]) {
         const amount = parseFloat(match[1].replace(/,/g, ''));
-        if (!isNaN(amount) && amount > 0 && amount < 500000) { // Safety ceiling to ignore account numbers
+        // Filter out unreasonable numbers or account numbers mistaken for amounts
+        if (!isNaN(amount) && amount > 0 && amount < 200000) {
           
-          // Approximate date filtering based on message timestamp if available
-          const smsDate = sms.date ? new Date(sms.date).getTime() : now;
+          // Safe date parsing with fallback to current time if missing
+          let smsDate = now;
+          if (sms.date) {
+            const parsed = new Date(Number(sms.date) || sms.date).getTime();
+            if (!isNaN(parsed)) smsDate = parsed;
+          }
+
           const diffDays = (now - smsDate) / (1000 * 60 * 60 * 24);
 
           let matchesTimeframe = true;
@@ -52,9 +64,9 @@ export default function App() {
           }
 
           if (matchesTimeframe) {
-            if (body.includes('debited') || body.includes('spent') || body.includes('paid') || body.includes('sent') || body.includes('dr')) {
+            if (isDebit) {
               filteredExp += amount;
-            } else if (body.includes('credited') || body.includes('received') || body.includes('deposited') || body.includes('cr')) {
+            } else if (isCredit) {
               filteredInc += amount;
             }
           }
@@ -81,7 +93,7 @@ export default function App() {
 
       if (messages.length > 0) {
         filterAndCalculate(messages, filterMode);
-        showToast(`Successfully synced ${messages.length} messages!`, 'success');
+        showToast(`Successfully analyzed ${messages.length} messages!`, 'success');
       } else {
         showToast('No SMS messages found in inbox.', 'info');
       }
@@ -99,7 +111,6 @@ export default function App() {
     }
   };
 
-  // Theme colors
   const theme = {
     bg: isDarkMode ? '#121212' : '#f8fafc',
     cardBg: isDarkMode ? '#1e1e1e' : '#ffffff',
@@ -114,14 +125,12 @@ export default function App() {
       {/* Header & Toggles */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
         <h2 style={{ margin: 0, fontSize: '20px' }}>Expense Tracker</h2>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button 
-            onClick={() => setIsDarkMode(!isDarkMode)}
-            style={{ padding: '6px 10px', borderRadius: '20px', border: `1px solid ${theme.border}`, background: theme.cardBg, color: theme.text, cursor: 'pointer', fontSize: '12px' }}
-          >
-            {isDarkMode ? '☀️ Light' : '🌙 Dark'}
-          </button>
-        </div>
+        <button 
+          onClick={() => setIsDarkMode(!isDarkMode)}
+          style={{ padding: '6px 10px', borderRadius: '20px', border: `1px solid ${theme.border}`, background: theme.cardBg, color: theme.text, cursor: 'pointer', fontSize: '12px' }}
+        >
+          {isDarkMode ? '☀️ Light' : '🌙 Dark'}
+        </button>
       </div>
 
       {/* Toast Notification */}
@@ -208,7 +217,7 @@ export default function App() {
             </button>
           </div>
           <h3 style={{ margin: '8px 0 0', color: '#22c55e', fontSize: '18px' }}>
-            {isIncomeMasked ? '••••••••' : `₹{metrics.income.toFixed(2)}`}
+            {isIncomeMasked ? '••••••••' : `₹${metrics.income.toFixed(2)}`}
           </h3>
         </div>
 
