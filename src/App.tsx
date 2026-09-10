@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { registerPlugin } from '@capacitor/core';
 
+import { SMSInboxReader } from '@solimanware/capacitor-sms-reader';
+
 // 🚀 THE FIX: We bypass the messy NPM package and hook directly into the native Android bridge.
 interface SMSPlugin {
   checkPermissions(): Promise<{ messages: string }>;
   requestPermissions(): Promise<void>;
   getMessages(options: { minDate?: number; maxDate?: number; limit?: number }): Promise<{ messages: any[] }>;
 }
-const SMSInboxReader = registerPlugin<SMSPlugin>('SMSInboxReader');
 
 interface CashflowStats {
   dailyExp: number;
