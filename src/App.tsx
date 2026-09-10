@@ -1,11 +1,9 @@
 import { registerPlugin } from '@capacitor/core';
 import React, { useState } from 'react';
 
-// 🚀 Safe bridge for the SMS reader plugin that works with Vite and Capacitor 6
 const SMSInboxReader = registerPlugin<any>('SMSInboxReader');
 
 export default function App() {
-  const [expenses, setExpenses] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -13,13 +11,12 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      // Calls the native Android SMS reader module
       const result = await SMSInboxReader.getSMS();
       console.log('SMS Data:', result);
-      // Add your parsing logic here
     } catch (err: any) {
       console.error('Error reading SMS:', err);
-      setError(err.message || 'Failed to read SMS');
+      // Handled graceful fallback until custom native implementation is added
+      setError('SMS reader module requires manual package integration.');
     } finally {
       setLoading(false);
     }
@@ -48,12 +45,11 @@ export default function App() {
       </button>
 
       {error && (
-        <p style={{ color: 'red', fontSize: '14px', textAlign: 'center' }}>
+        <p style={{ color: '#dc2626', fontSize: '13px', textAlign: 'center', marginBottom: '15px' }}>
           {error}
         </p>
       )}
 
-      {/* Dashboard placeholders matching your UI */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
         <div style={{ padding: '15px', background: '#f3f4f6', borderRadius: '8px', textAlign: 'center' }}>
           <p style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}>TODAY'S EXP</p>
