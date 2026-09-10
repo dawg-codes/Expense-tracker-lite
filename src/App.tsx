@@ -1,217 +1,77 @@
-import { useState } from 'react';
 import { registerPlugin } from '@capacitor/core';
+import React, { useState } from 'react';
 
-import { SMSInboxReader } from '@solimanware/capacitor-sms-reader';
-
-// 🚀 THE FIX: We bypass the messy NPM package and hook directly into the native Android bridge.
-interface SMSPlugin {
-  checkPermissions(): Promise<{ messages: string }>;
-  requestPermissions(): Promise<void>;
-  getMessages(options: { minDate?: number; maxDate?: number; limit?: number }): Promise<{ messages: any[] }>;
-}
-
-interface CashflowStats {
-  dailyExp: number;
-  weeklyExp: number;
-  monthlyExp: number;
-  yearlyExp: number;
-  monthlyInc: number;
-  yearlyInc: number;
-}
-
-interface Transaction {
-  id: string;
-  amount: number;
-  date: number;
-  rawText: string;
-  tag: string;
-  type: 'debit' | 'credit';
-}
+// 🚀 Safe bridge for the SMS reader plugin that works with Vite and Capacitor 6
+const SMSInboxReader = registerPlugin<any>('SMSInboxReader');
 
 export default function App() {
-  const [stats, setStats] = useState<CashflowStats>({ 
-    dailyExp: 0, weeklyExp: 0, monthlyExp: 0, yearlyExp: 0, monthlyInc: 0, yearlyInc: 0 
-  });
-  const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
+  const [expenses, setExpenses] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const detectCategory = (text: string, type: 'debit' | 'credit') => {
-    if (type === 'credit') return '💰 Income/Refund';
-    
-    const lowerText = text.toLowerCase();
-    if (lowerText.includes('swiggy') || lowerText.includes('zomato')) return '🍔 Food';
-    if (lowerText.includes('amazon') || lowerText.includes('flipkart')) return '🛍️ Shopping';
-    if (lowerText.includes('paytm') || lowerText.includes('phonepe') || lowerText.includes('gpay')) return '💸 UPI/Transfer';
-    if (lowerText.includes('jio') || lowerText.includes('airtel') || lowerText.includes('recharge')) return '📱 Bills';
-    return '💳 General';
-  };
-
-  const parseSMSForCashflow = (smsList: any[]) => {
-    let dailyExp = 0, weeklyExp = 0, monthlyExp = 0, yearlyExp = 0;
-    let monthlyInc = 0, yearlyInc = 0;
-    const capturedTransactions: Transaction[] = [];
-
-    const debitKeywords = /(debited|spent|paid|withdrawn|payment|sent)/i;
-    const creditKeywords = /(credited|refunded|reversed|received)/i;
-    const amountRegex = /(?:rs\.?|inr)\s*([\d,]+\.?\d*)/i;
-
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const startOfWeek = today - (now.getDay() * 24 * 60 * 60 * 1000); 
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-    const startOfYear = new Date(now.getFullYear(), 0, 1).getTime();
-
-    smsList.forEach(sms => {
-      const lowerText = sms.body.toLowerCase();
-      
-      if (lowerText.includes('otp')) return;
-
-      const isDebit = debitKeywords.test(lowerText);
-      const isCredit = creditKeywords.test(lowerText);
-
-      if ((!isDebit && !isCredit) || (isDebit && isCredit)) return;
-
-      const match = lowerText.match(amountRegex);
-      if (match && match[1]) {
-        const amount = parseFloat(match[1].replace(/,/g, ''));
-        const smsDate = new Date(sms.date).getTime();
-        const type = isCredit ? 'credit' : 'debit';
-
-        if (type === 'debit') {
-          if (smsDate >= today) dailyExp += amount;
-          if (smsDate >= startOfWeek) weeklyExp += amount;
-          if (smsDate >= startOfMonth) monthlyExp += amount;
-          if (smsDate >= startOfYear) yearlyExp += amount;
-        } else {
-          if (smsDate >= startOfMonth) monthlyInc += amount;
-          if (smsDate >= startOfYear) yearlyInc += amount;
-        }
-
-        capturedTransactions.push({
-          id: sms.id?.toString() || Math.random().toString(),
-          amount: amount,
-          date: smsDate,
-          rawText: sms.body,
-          tag: detectCategory(sms.body, type),
-          type: type
-        });
-      }
-    });
-    
-    setStats({ dailyExp, weeklyExp, monthlyExp, yearlyExp, monthlyInc, yearlyInc });
-    
-    const sortedRecent = capturedTransactions.sort((a, b) => b.date - a.date).slice(0, 15);
-    setRecentTransactions(sortedRecent);
-  };
+  const [error, setError] = useState<string | null>(null);
 
   const syncSMS = async () => {
     setLoading(true);
-    setError('');
-    
+    setError(null);
     try {
-      const status = await SMSInboxReader.checkPermissions();
-      if (status.messages !== 'granted') {
-        await SMSInboxReader.requestPermissions();
-      }
-
-      const now = Date.now();
-      const startOfYear = new Date(new Date().getFullYear(), 0, 1).getTime();
-      
-      const { messages } = await SMSInboxReader.getMessages({
-        minDate: startOfYear,
-        maxDate: now,
-        limit: 2000 
-      });
-
-      parseSMSForCashflow(messages || []);
-
+      // Calls the native Android SMS reader module
+      const result = await SMSInboxReader.getSMS();
+      console.log('SMS Data:', result);
+      // Add your parsing logic here
     } catch (err: any) {
-      setError(err.message || 'Failed to sync SMS. Ensure permissions are granted.');
+      console.error('Error reading SMS:', err);
+      setError(err.message || 'Failed to read SMS');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="container">
-      <div className="header">
-        <h2 style={{margin: 0}}>Expense Tracker Lite</h2>
-      </div>
-
-      <button className="btn" onClick={syncSMS} disabled={loading}>
-        {loading ? 'Scanning Inbox...' : 'Sync Banking SMS'}
+    <div style={{ padding: '20px', fontFamily: 'sans-serif', maxWidth: '400px', margin: 'auto' }}>
+      <h2>Expense Tracker Lite</h2>
+      
+      <button 
+        onClick={syncSMS}
+        style={{
+          width: '100%',
+          padding: '12px',
+          backgroundColor: '#4f46e5',
+          color: 'white',
+          border: 'none',
+          borderRadius: '8px',
+          fontSize: '16px',
+          fontWeight: 'bold',
+          cursor: 'pointer',
+          marginBottom: '20px'
+        }}
+      >
+        {loading ? 'Syncing...' : 'Sync Banking SMS'}
       </button>
 
-      {error && <p style={{color: 'var(--danger)', textAlign: 'center', fontSize: 14, fontWeight: 600}}>{error}</p>}
-
-      <div style={{marginTop: 30}}>
-        
-        {/* Short-term Expenses */}
-        <div className="grid">
-          <div className="card">
-            <div className="label">Today's Exp</div>
-            <div className="amount debit">₹{stats.dailyExp.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
-          </div>
-          <div className="card">
-            <div className="label">This Week Exp</div>
-            <div className="amount debit">₹{stats.weeklyExp.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
-          </div>
-        </div>
-
-        {/* Monthly Cashflow */}
-        <div className="grid">
-          <div className="card" style={{borderTop: '4px solid var(--danger)'}}>
-            <div className="label">Month Exp</div>
-            <div className="amount debit">₹{stats.monthlyExp.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
-          </div>
-          <div className="card" style={{borderTop: '4px solid var(--success)'}}>
-            <div className="label">Month Income</div>
-            <div className="amount credit">₹{stats.monthlyInc.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
-          </div>
-        </div>
-
-        {/* Yearly Cashflow */}
-        <div className="grid">
-          <div className="card">
-            <div className="label">Year Exp</div>
-            <div className="amount debit">₹{stats.yearlyExp.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
-          </div>
-          <div className="card">
-            <div className="label">Year Income</div>
-            <div className="amount credit">₹{stats.yearlyInc.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</div>
-          </div>
-        </div>
-
-      </div>
-
-      {recentTransactions.length > 0 && (
-        <div style={{marginTop: 40}}>
-          <h3 style={{fontSize: 18, marginBottom: 15, color: 'var(--text-main)'}}>Recent Transactions</h3>
-          <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
-            {recentTransactions.map((tx) => (
-              <div key={tx.id} className="card" style={{padding: 15, textAlign: 'left', margin: 0, borderLeft: `5px solid ${tx.type === 'credit' ? 'var(--success)' : 'var(--danger)'}`}}>
-                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8}}>
-                  <div style={{display: 'flex', alignItems: 'center', gap: 10}}>
-                    <span style={{fontWeight: 700, fontSize: 18, color: tx.type === 'credit' ? 'var(--success)' : 'var(--danger)'}}>
-                      {tx.type === 'credit' ? '+' : '-'}₹{tx.amount.toLocaleString('en-IN')}
-                    </span>
-                    <span style={{fontSize: 11, background: '#f0f2f5', padding: '4px 8px', borderRadius: 12, fontWeight: 600, color: '#555'}}>
-                      {tx.tag}
-                    </span>
-                  </div>
-                  <span style={{fontSize: 12, color: '#888'}}>
-                    {new Date(tx.date).toLocaleDateString('en-IN', {day: 'numeric', month: 'short'})}
-                  </span>
-                </div>
-                <div style={{fontSize: 12, color: '#555', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>
-                  {tx.rawText}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+      {error && (
+        <p style={{ color: 'red', fontSize: '14px', textAlign: 'center' }}>
+          {error}
+        </p>
       )}
+
+      {/* Dashboard placeholders matching your UI */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+        <div style={{ padding: '15px', background: '#f3f4f6', borderRadius: '8px', textAlign: 'center' }}>
+          <p style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}>TODAY'S EXP</p>
+          <h3 style={{ margin: '5px 0 0', color: '#dc2626' }}>₹0.00</h3>
+        </div>
+        <div style={{ padding: '15px', background: '#f3f4f6', borderRadius: '8px', textAlign: 'center' }}>
+          <p style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}>THIS WEEK EXP</p>
+          <h3 style={{ margin: '5px 0 0', color: '#dc2626' }}>₹0.00</h3>
+        </div>
+        <div style={{ padding: '15px', background: '#f3f4f6', borderRadius: '8px', textAlign: 'center' }}>
+          <p style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}>MONTH EXP</p>
+          <h3 style={{ margin: '5px 0 0', color: '#dc2626' }}>₹0.00</h3>
+        </div>
+        <div style={{ padding: '15px', background: '#f3f4f6', borderRadius: '8px', textAlign: 'center' }}>
+          <p style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}>MONTH INCOME</p>
+          <h3 style={{ margin: '5px 0 0', color: '#16a34a' }}>₹0.00</h3>
+        </div>
+      </div>
     </div>
   );
 }
