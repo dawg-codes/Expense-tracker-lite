@@ -7,7 +7,14 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'error' | 'success' | 'info' } | null>(null);
   const [smsList, setSmsList] = useState<any[]>([]);
-  const [filterMode, setFilterMode] = useState<'weekly' | 'monthly' | 'yearly'>('monthly');
+  const [filterMode, setFilterMode] = useState<'weekly' | 'monthly' | 'yearly' | 'custom'>('monthly');
+  
+  // Custom date range states (defaults to current month)
+  const todayStr = new Date().toISOString().split('T')[0];
+  const thirtyDaysAgoStr = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const [startDate, setStartDate] = useState(thirtyDaysAgoStr);
+  const [endDate, setEndDate] = useState(todayStr);
+
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isIncomeMasked, setIsIncomeMasked] = useState(true);
 
@@ -16,10 +23,17 @@ export default function App() {
     income: 0,
     categories: {
       Food: 0,
-      Shopping: 0,
-      Fuel: 0,
+      Home: 0,
       EMI: 0,
-      Others: 0
+      Transport: 0,
+      Shopping: 0,
+      Bills: 0,
+      Health: 0,
+      Family: 0,
+      Travel: 0,
+      Entertainment: 0,
+      Finance: 0,
+      Other: 0
     }
   });
 
@@ -28,19 +42,28 @@ export default function App() {
     setTimeout(() => setToast(null), 4000);
   };
 
-  const classifyCategory = (body: string): 'Food' | 'Shopping' | 'Fuel' | 'EMI' | 'Others' => {
-    if (body.includes('swiggy') || body.includes('zomato') || body.includes('restaurant') || body.includes('food') || body.includes('cafe')) return 'Food';
-    if (body.includes('amazon') || body.includes('flipkart') || body.includes('myntra') || body.includes('shopping') || body.includes('store')) return 'Shopping';
-    if (body.includes('petrol') || body.includes('fuel') || body.includes('diesel') || body.includes('shell') || body.includes('iocl')) return 'Fuel';
-    if (body.includes('emi') || body.includes('loan') || body.includes('installment')) return 'EMI';
-    return 'Others';
+  const classifyCategory = (body: string): keyof typeof metrics.categories => {
+    if (body.includes('swiggy') || body.includes('zomato') || body.includes('restaurant') || body.includes('food') || body.includes('cafe') || body.includes('grocery') || body.includes('blinkit') || body.includes('zepto')) return 'Food';
+    if (body.includes('rent') || body.includes('maintenance') || body.includes('society') || body.includes('furniture') || body.includes('home')) return 'Home';
+    if (body.includes('emi') || body.includes('loan') || body.includes('installment') || body.includes('cc payment')) return 'EMI';
+    if (body.includes('petrol') || body.includes('fuel') || body.includes('diesel') || body.includes('shell') || body.includes('iocl') || body.includes('uber') || body.includes('ola') || body.includes('metro')) return 'Transport';
+    if (body.includes('amazon') || body.includes('flipkart') || body.includes('myntra') || body.includes('shopping') || body.includes('store') || body.includes('ajio') || body.includes('zara')) return 'Shopping';
+    if (body.includes('electricity') || body.includes('water') || body.includes('wifi') || body.includes('broadband') || body.includes('mobile') || body.includes('jio') || body.includes('airtel') || body.includes('bill')) return 'Bills';
+    if (body.includes('pharmacy') || body.includes('medical') || body.includes('doctor') || body.includes('hospital') || body.includes('apollo') || body.includes('health')) return 'Health';
+    if (body.includes('school') || body.includes('kids') || body.includes('parents') || body.includes('family')) return 'Family';
+    if (body.includes('flight') || body.includes('hotel') || body.includes('train') || body.includes('irctc') || body.includes('makemytrip') || body.includes('travel')) return 'Travel';
+    if (body.includes('netflix') || body.includes('prime') || body.includes('hotstar') || body.includes('movie') || body.includes('pvr') || body.includes('bookmyshow')) return 'Entertainment';
+    if (body.includes('mutual fund') || body.includes('sip') || body.includes('zerodha') || body.includes('groww') || body.includes('investment') || body.includes('stock') || body.includes('insurance') || body.includes('tax')) return 'Finance';
+    return 'Other';
   };
 
-  const filterAndCalculate = (messages: any[], mode: string) => {
+  const filterAndCalculate = (messages: any[], mode: string, customStart?: string, customEnd?: string) => {
     const now = new Date().getTime();
     let filteredExp = 0;
     let filteredInc = 0;
-    const cats = { Food: 0, Shopping: 0, Fuel: 0, EMI: 0, Others: 0 };
+    const cats: Record<string, number> = {
+      Food: 0, Home: 0, EMI: 0, Transport: 0, Shopping: 0, Bills: 0, Health: 0, Family: 0, Travel: 0, Entertainment: 0, Finance: 0, Other: 0
+    };
 
     messages.forEach((sms) => {
       const body = (sms.body || '').toLowerCase();
@@ -73,6 +96,11 @@ export default function App() {
             const currentYear = new Date().getFullYear();
             if (smsYear !== currentYear) matchesTimeframe = false;
           }
+          if (mode === 'custom' && customStart && customEnd) {
+            const startTimestamp = new Date(customStart).setHours(0, 0, 0, 0);
+            const endTimestamp = new Date(customEnd).setHours(23, 59, 59, 999);
+            if (smsDate < startTimestamp || smsDate > endTimestamp) matchesTimeframe = false;
+          }
 
           if (matchesTimeframe) {
             if (isDebit) {
@@ -90,7 +118,7 @@ export default function App() {
     setMetrics({
       expense: filteredExp,
       income: filteredInc,
-      categories: cats
+      categories: cats as any
     });
   };
 
@@ -106,7 +134,7 @@ export default function App() {
       setSmsList(messages);
 
       if (messages.length > 0) {
-        filterAndCalculate(messages, filterMode);
+        filterAndCalculate(messages, filterMode, startDate, endDate);
         showToast(`Successfully analyzed ${messages.length} messages!`, 'success');
       } else {
         showToast('No SMS messages found in inbox.', 'info');
@@ -120,28 +148,62 @@ export default function App() {
 
   const clearData = () => {
     setSmsList([]);
-    setMetrics({ expense: 0, income: 0, categories: { Food: 0, Shopping: 0, Fuel: 0, EMI: 0, Others: 0 } });
+    setMetrics({ 
+      expense: 0, 
+      income: 0, 
+      categories: { Food: 0, Home: 0, EMI: 0, Transport: 0, Shopping: 0, Bills: 0, Health: 0, Family: 0, Travel: 0, Entertainment: 0, Finance: 0, Other: 0 } 
+    });
     showToast('App data cleared successfully.', 'info');
   };
 
-  const handleFilterChange = (mode: 'weekly' | 'monthly' | 'yearly') => {
+  const handleFilterChange = (mode: 'weekly' | 'monthly' | 'yearly' | 'custom') => {
     setFilterMode(mode);
     if (smsList.length > 0) {
-      filterAndCalculate(smsList, mode);
+      filterAndCalculate(smsList, mode, startDate, endDate);
     }
   };
 
-  // Compute highest category and percentages for chart
-  const sortedCategories = Object.entries(metrics.categories).sort((a, b) => b[1] - a[1]);
+  const handleDateApply = () => {
+    if (smsList.length > 0) {
+      filterAndCalculate(smsList, 'custom', startDate, endDate);
+      showToast('Custom date range applied!', 'success');
+    }
+  };
+
+  // Active non-zero categories for display and charts
+  const activeCategories = Object.entries(metrics.categories).filter(([_, amount]) => amount > 0);
+  const sortedCategories = [...activeCategories].sort((a, b) => b[1] - a[1]);
   const topCategory = sortedCategories[0];
-  const totalExp = metrics.expense || 1; // Prevent division by zero
+  const totalExp = metrics.expense || 1;
+
+  const categoryLabels: Record<string, string> = {
+    Food: '🍔 Food',
+    Home: '🏠 Home',
+    EMI: '💳 EMI',
+    Transport: '⛽ Transport',
+    Shopping: '🛍️ Shopping',
+    Bills: '💡 Bills',
+    Health: '🏥 Health',
+    Family: '👨‍👩‍👧 Family',
+    Travel: '✈️ Travel',
+    Entertainment: '🎬 Entertainment',
+    Finance: '💰 Finance',
+    Other: '📦 Other'
+  };
 
   const categoryColors: Record<string, string> = {
     Food: '#f59e0b',
-    Shopping: '#ec4899',
-    Fuel: '#3b82f6',
+    Home: '#10b981',
     EMI: '#8b5cf6',
-    Others: '#64748b'
+    Transport: '#3b82f6',
+    Shopping: '#ec4899',
+    Bills: '#06b6d4',
+    Health: '#ef4444',
+    Family: '#f97316',
+    Travel: '#6366f1',
+    Entertainment: '#a855f7',
+    Finance: '#14b8a6',
+    Other: '#64748b'
   };
 
   const theme = {
@@ -214,20 +276,20 @@ export default function App() {
       </button>
 
       {/* Timeframe Filter Selector */}
-      <div style={{ display: 'flex', background: theme.cardBg, padding: '4px', borderRadius: '10px', border: `1px solid ${theme.border}`, marginBottom: '20px' }}>
-        {(['weekly', 'monthly', 'yearly'] as const).map((mode) => (
+      <div style={{ display: 'flex', background: theme.cardBg, padding: '4px', borderRadius: '10px', border: `1px solid ${theme.border}`, marginBottom: '12px' }}>
+        {(['weekly', 'monthly', 'yearly', 'custom'] as const).map((mode) => (
           <button
             key={mode}
             onClick={() => handleFilterChange(mode)}
             style={{
               flex: 1,
-              padding: '8px',
+              padding: '8px 4px',
               border: 'none',
               borderRadius: '8px',
               background: filterMode === mode ? '#4f46e5' : 'transparent',
               color: filterMode === mode ? '#ffffff' : theme.subText,
               fontWeight: 'bold',
-              fontSize: '12px',
+              fontSize: '11px',
               cursor: 'pointer',
               textTransform: 'capitalize',
               transition: 'all 0.2s'
@@ -237,6 +299,38 @@ export default function App() {
           </button>
         ))}
       </div>
+
+      {/* Custom Date Picker Section */}
+      {filterMode === 'custom' && (
+        <div style={{ background: theme.cardBg, padding: '12px', borderRadius: '10px', border: `1px solid ${theme.border}`, marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: '10px', color: theme.subText, display: 'block', marginBottom: '2px' }}>Start Date</label>
+              <input 
+                type="date" 
+                value={startDate} 
+                onChange={(e) => setStartDate(e.target.value)}
+                style={{ width: '100%', padding: '6px', borderRadius: '6px', border: `1px solid ${theme.border}`, background: theme.bg, color: theme.text, fontSize: '12px' }}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: '10px', color: theme.subText, display: 'block', marginBottom: '2px' }}>End Date</label>
+              <input 
+                type="date" 
+                value={endDate} 
+                onChange={(e) => setEndDate(e.target.value)}
+                style={{ width: '100%', padding: '6px', borderRadius: '6px', border: `1px solid ${theme.border}`, background: theme.bg, color: theme.text, fontSize: '12px' }}
+              />
+            </div>
+          </div>
+          <button 
+            onClick={handleDateApply}
+            style={{ padding: '8px', background: '#4f46e5', color: 'white', border: 'none', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' }}
+          >
+            Apply Date Filter
+          </button>
+        </div>
+      )}
 
       {/* Metrics Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px' }}>
@@ -262,30 +356,29 @@ export default function App() {
         </div>
       </div>
 
-      {/* Catchy Proportional Spendings Chart Bar */}
-      {metrics.expense > 0 && (
+      {/* Catchy Proportional Spendings Bar Chart (Hidden if empty) */}
+      {activeCategories.length > 0 && (
         <div style={{ background: theme.cardBg, padding: '14px', borderRadius: '12px', border: `1px solid ${theme.border}`, marginBottom: '20px' }}>
           <p style={{ fontSize: '12px', fontWeight: 'bold', margin: '0 0 10px', color: theme.subText }}>
             📊 SPENDING DISTRIBUTION CHART
           </p>
           <div style={{ display: 'flex', height: '12px', width: '100%', borderRadius: '6px', overflow: 'hidden', background: '#e2e8f0', marginBottom: '10px' }}>
-            {Object.entries(metrics.categories).map(([cat, amount]) => {
+            {activeCategories.map(([cat, amount]) => {
               const pct = (amount / totalExp) * 100;
-              if (pct === 0) return null;
               return (
                 <div 
                   key={cat} 
                   style={{ width: `${pct}%`, background: categoryColors[cat], height: '100%', transition: 'width 0.3s ease' }} 
-                  title={`${cat}: ${pct.toFixed(1)}%`}
+                  title={`${categoryLabels[cat]}: ${pct.toFixed(1)}%`}
                 />
               );
             })}
           </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', fontSize: '10px', color: theme.subText }}>
-            {Object.entries(metrics.categories).map(([cat, amount]) => amount > 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', fontSize: '10px', color: theme.subText }}>
+            {activeCategories.map(([cat, amount]) => (
               <span key={cat} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: categoryColors[cat] }}></span>
-                {cat} ({((amount / totalExp) * 100).toFixed(0)}%)
+                {categoryLabels[cat]} ({((amount / totalExp) * 100).toFixed(0)}%)
               </span>
             ))}
           </div>
@@ -297,21 +390,26 @@ export default function App() {
         <p style={{ fontSize: '12px', fontWeight: 'bold', margin: '0 0 10px', color: theme.subText }}>
           {filterMode.toUpperCase()} BREAKDOWN & INSIGHTS
         </p>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px' }}>
-          {Object.entries(metrics.categories).map(([cat, amount]) => (
-            <div key={cat} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', borderBottom: `1px solid ${theme.border}`, paddingBottom: '6px' }}>
-              <span>{cat === 'Food' ? '🍔 Food' : cat === 'Shopping' ? '🛍️ Shopping' : cat === 'Fuel' ? '⛽ Fuel' : cat === 'EMI' ? '🏦 EMI' : '📦 Others'}</span>
-              <strong style={{ color: amount > 0 ? '#ef4444' : theme.subText }}>₹{amount.toFixed(2)}</strong>
-            </div>
-          ))}
-        </div>
+        
+        {activeCategories.length === 0 ? (
+          <p style={{ fontSize: '12px', color: theme.subText, textAlign: 'center', padding: '10px 0' }}>No expenses recorded for this timeframe.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '14px' }}>
+            {activeCategories.map(([cat, amount]) => (
+              <div key={cat} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', borderBottom: `1px solid ${theme.border}`, paddingBottom: '6px' }}>
+                <span>{categoryLabels[cat]}</span>
+                <strong style={{ color: '#ef4444' }}>₹{amount.toFixed(2)}</strong>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Quick Spending Pointers */}
-        {metrics.expense > 0 && (
+        {activeCategories.length > 0 && topCategory && (
           <div style={{ background: isDarkMode ? '#252525' : '#f1f5f9', padding: '10px', borderRadius: '8px', fontSize: '11px', lineHeight: '1.4', color: theme.subText }}>
             💡 <strong>Quick Insights:</strong> 
             <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
-              <li>Most of your money is spent on <strong style={{ color: theme.text }}>{topCategory[0]}</strong> (₹{topCategory[1].toFixed(2)}).</li>
+              <li>Most of your money is spent on <strong style={{ color: theme.text }}>{categoryLabels[topCategory[0]]}</strong> (₹{topCategory[1].toFixed(2)}).</li>
               <li>{metrics.expense > metrics.income ? '⚠️ Your expenses exceed your recorded income for this period.' : '✅ Your cash flow is positive for this timeframe.'}</li>
             </ul>
           </div>
