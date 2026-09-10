@@ -1,7 +1,7 @@
 import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'expense-tracker', // Keep whatever appId is already here
+  appId: 'com.expense.tracker', // Keep whatever appId is already here
   appName: 'Expense Tracker Lite',
   webDir: 'dist',
   plugins: {
