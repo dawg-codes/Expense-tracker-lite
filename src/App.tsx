@@ -1,12 +1,13 @@
 import { useState } from 'react';
-// 1. Wildcard import bypasses the strict static export error
-import * as SMSReaderPlugin from '@solimanware/capacitor-sms-reader';
+import { registerPlugin } from '@capacitor/core';
 
-// 2. Safely grab the plugin regardless of whether it's named SmsInboxReader, SMSInboxReader, or default
-const SMSInboxReader: any = 
-  (SMSReaderPlugin as any).SMSInboxReader || 
-  (SMSReaderPlugin as any).SmsInboxReader || 
-  (SMSReaderPlugin as any).default;
+// 🚀 THE FIX: We bypass the messy NPM package and hook directly into the native Android bridge.
+interface SMSPlugin {
+  checkPermissions(): Promise<{ messages: string }>;
+  requestPermissions(): Promise<void>;
+  getMessages(options: { minDate?: number; maxDate?: number; limit?: number }): Promise<{ messages: any[] }>;
+}
+const SMSInboxReader = registerPlugin<SMSPlugin>('SMSInboxReader');
 
 interface CashflowStats {
   dailyExp: number;
@@ -108,11 +109,6 @@ export default function App() {
     setError('');
     
     try {
-      // Safety check in case the native plugin didn't load properly
-      if (!SMSInboxReader) {
-        throw new Error("SMS Plugin not loaded correctly. Please restart the app.");
-      }
-
       const status = await SMSInboxReader.checkPermissions();
       if (status.messages !== 'granted') {
         await SMSInboxReader.requestPermissions();
