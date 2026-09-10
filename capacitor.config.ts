@@ -1,16 +1,9 @@
 import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.expense.tracker', // Keep whatever appId is already here
+  appId: 'com.dawgcode.expensetracker',
   appName: 'Expense Tracker Lite',
-  webDir: 'dist',
-  plugins: {
-    SMSInboxReader: {
-      android: {
-        name: 'com.capacitor.sms.reader.SMSInboxReaderPlugin'
-      }
-    }
-  }
+  webDir: 'dist'
 };
 
 export default config;
