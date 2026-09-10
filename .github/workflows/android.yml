@@ -27,6 +27,10 @@ jobs:
     - name: Initialize Android Platform
       run: npx cap add android
 
+    - name: Inject SMS Permissions into AndroidManifest
+      run: |
+        sed -i 's|</manifest>|    <uses-permission android:name="android.permission.READ_SMS" />\n    <uses-permission android:name="android.permission.READ_PHONE_STATE" />\n</manifest>|' android/app/src/main/AndroidManifest.xml
+
     - name: Sync Capacitor
       run: npx cap sync android
 
@@ -47,4 +51,3 @@ jobs:
       with:
         name: expense-tracker-lite-apk
         path: android/app/build/outputs/apk/debug/app-debug.apk
-        
