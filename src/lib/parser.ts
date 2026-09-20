@@ -28,6 +28,14 @@ export interface Txn {
   category: Category;
   date: number;
   sender: string;
+  ref?: string;
+  fp: string;
+}
+
+export interface Dupe {
+  txn: Txn;
+  keptId: string;
+  reason: string;
 }
 
 export interface RawSms {
@@ -40,6 +48,7 @@ export interface RawSms {
 }
 
 const MAX_AMOUNT = 1_000_000;
+const MIN = 60_000;
 const DAY = 86_400_000;
 
 const RULES: Array<[Category, RegExp]> = [
@@ -62,6 +71,7 @@ const CREDIT = /\b(?:credited|received|deposited|refund(?:ed)?|cr)\b/;
 const BALANCE =
   /\b(?:avl\.?\s*(?:bal(?:ance)?|lmt|limit)|available\s*(?:bal(?:ance)?|limit)|(?:closing\s*)?bal(?:ance)?|total\s*(?:due|outstanding))\b[^0-9₹]*(?:rs\.?|inr|₹)?\s*[\d,]+(?:\.\d+)?/gi;
 const AMOUNT = /(?:\b(?:rs\.?|inr)|₹)\s*([\d,]+(?:\.\d+)?)/i;
+const REF = /(?:upi|ref|txn|rrn|utr|imps|neft)[^\d]{0,12}(\d{9,16})/i;
 
 function classify(body: string): Category {
   for (const [cat, re] of RULES) if (re.test(body)) return cat;
@@ -81,6 +91,15 @@ function toTime(d: string | number | undefined): number {
   return Number.isFinite(t) ? t : Date.now();
 }
 
+/** "VM-HDFCBK-S" and "AD-HDFCBK" both become "HDFCBK". */
+function normSender(s: string): string {
+  return s
+    .toUpperCase()
+    .replace(/^[A-Z0-9]{2}-/, '')
+    .replace(/-[A-Z]$/, '')
+    .replace(/[^A-Z0-9]/g, '');
+}
+
 export function parseSms(messages: RawSms[]): Txn[] {
   const out: Txn[] = [];
   for (const sms of messages) {
@@ -88,9 +107,10 @@ export function parseSms(messages: RawSms[]): Txn[] {
     const body = raw.toLowerCase();
     if (!body || SKIP.test(body)) continue;
 
-    const isDebit = DEBIT.test(body);
-    const isCredit = CREDIT.test(body);
-    if (!isDebit && !isCredit) continue;
+    const di = body.search(DEBIT);
+    const ci = body.search(CREDIT);
+    if (di < 0 && ci < 0) continue;
+    const isDebit = di >= 0 && (ci < 0 || di < ci);
 
     const match = body.replace(BALANCE, ' ').match(AMOUNT);
     if (!match) continue;
@@ -98,6 +118,7 @@ export function parseSms(messages: RawSms[]): Txn[] {
     if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_AMOUNT) continue;
 
     const date = toTime(sms.date);
+    const fp = hash(body.replace(/[^a-z0-9]/g, ''));
     out.push({
       id: String(sms.id ?? sms._id ?? hash(`${date}|${raw}`)),
       type: isDebit ? 'debit' : 'credit',
@@ -105,9 +126,62 @@ export function parseSms(messages: RawSms[]): Txn[] {
       category: isDebit ? classify(body) : 'Other',
       date,
       sender: sms.sender || sms.address || 'Bank',
+      ref: body.match(REF)?.[1],
+      fp,
     });
   }
   return out;
+}
+
+/** Splits transactions into unique ones and ignored duplicates (with a reason). */
+export function dedupe(all: Txn[]): { unique: Txn[]; dupes: Dupe[] } {
+  const sorted = [...all].sort((a, b) => a.date - b.date);
+  const unique: Txn[] = [];
+  const dupes: Dupe[] = [];
+  const byRef = new Map<string, Txn>();
+  const paired = new Set<string>();
+
+  for (const t of sorted) {
+    let kept: Txn | undefined;
+    let reason = '';
+
+    if (t.ref) {
+      const k = byRef.get(`${t.type}|${t.amount}|${t.ref}`);
+      if (k) {
+        kept = k;
+        reason = 'Same reference number';
+      }
+    }
+
+    if (!kept) {
+      for (let i = unique.length - 1; i >= 0; i--) {
+        const k = unique[i];
+        const gap = t.date - k.date;
+        if (gap > 10 * MIN) break;
+        if (k.type !== t.type || k.amount !== t.amount) continue;
+        if (t.ref && k.ref && t.ref !== k.ref) continue;
+        if (t.fp === k.fp && gap <= 2 * MIN) {
+          kept = k;
+          reason = 'Identical message';
+          break;
+        }
+        if (normSender(t.sender) !== normSender(k.sender) && !paired.has(k.id)) {
+          kept = k;
+          reason = 'Same amount from two senders (bank + app alert)';
+          paired.add(k.id);
+          break;
+        }
+      }
+    }
+
+    if (kept) {
+      dupes.push({ txn: t, keptId: kept.id, reason });
+    } else {
+      unique.push(t);
+      if (t.ref) byRef.set(`${t.type}|${t.amount}|${t.ref}`, t);
+    }
+  }
+  return { unique, dupes };
 }
 
 function parseLocalDate(v: string): Date | null {
