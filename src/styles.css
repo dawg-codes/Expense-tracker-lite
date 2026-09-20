@@ -196,6 +196,20 @@ button { cursor: pointer; }
 .txn-meta small { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .txn-amt { font-weight: 700; font-size: 14px; }
 
+/* duplicates review */
+.dupe-head {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+}
+
 /* empty */
 .empty { text-align: center; padding: 34px 22px; }
 .empty-emoji { font-size: 48px; }
