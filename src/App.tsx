@@ -6,6 +6,7 @@ import { animate } from 'motion';
 import {
   CATEGORIES,
   CATEGORY_META,
+  dedupe,
   inr,
   parseSms,
   rangeFor,
@@ -201,7 +202,7 @@ const daysAgoISO = (n: number) => new Date(Date.now() - n * 86_400_000).toISOStr
 export default function App() {
   const reduce = !!useReducedMotion();
 
-  const [txns, setTxns] = usePersisted<Txn[]>('et:txns', []);
+  const [txns, setTxns] = usePersisted<Txn[]>('et:txns:v2', []);
   const [lastSync, setLastSync] = usePersisted<number | null>('et:lastSync', null);
   const [theme, setTheme] = usePersisted<'dark' | 'light'>(
     'et:theme',
@@ -217,6 +218,9 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [showAll, setShowAll] = useState(false);
   const toastId = useRef(0);
+
+  const [showDupes, setShowDupes] = useState(false);
+  const { unique, dupes } = useMemo(() => dedupe(txns), [txns]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -250,7 +254,7 @@ export default function App() {
   const customInvalid = filter === 'custom' && !range;
 
   const { expense, income, ranked, list } = useMemo(() => {
-    const inRange = range ? txns.filter((t) => t.date >= range[0] && t.date <= range[1]) : [];
+    const inRange = range ? unique.filter((t) => t.date >= range[0] && t.date <= range[1]) : [];
     const cats = Object.fromEntries(CATEGORIES.map((c) => [c, 0])) as Record<Category, number>;
     let expense = 0;
     let income = 0;
@@ -265,7 +269,7 @@ export default function App() {
       .sort((a, b) => b[1] - a[1]);
     const list = [...inRange].sort((a, b) => b.date - a.date);
     return { expense, income, ranked, list };
-  }, [txns, range]);
+  }, [unique, range]);
 
   const rangeLabel = useMemo(() => {
     if (filter === 'weekly') return 'Last 7 days';
@@ -311,16 +315,16 @@ export default function App() {
       }
 
       const parsed = parseSms(messages);
-      const known = new Set(txns.map((t) => t.id));
-      const fresh = parsed.filter((t) => !known.has(t.id));
-      setTxns((prev) => {
-        const map = new Map(prev.map((t) => [t.id, t]));
-        parsed.forEach((t) => map.set(t.id, t));
-        return [...map.values()].sort((a, b) => b.date - a.date);
-      });
+      const merged = new Map(txns.map((t) => [t.id, t]));
+      parsed.forEach((t) => merged.set(t.id, t));
+      const all = [...merged.values()].sort((a, b) => b.date - a.date);
+      const before = dedupe(txns).unique.length;
+      const after = dedupe(all);
+      const added = after.unique.length - before;
+      setTxns(all);
       setLastSync(Date.now());
       pushToast(
-        fresh.length ? `${fresh.length} new transaction${fresh.length > 1 ? 's' : ''} found` : 'Already up to date',
+        `${added > 0 ? `${added} new` : 'No new'} transaction${added === 1 ? '' : 's'} · ${after.dupes.length} duplicate${after.dupes.length === 1 ? '' : 's'} ignored`,
         'success',
       );
     } catch (err: any) {
@@ -342,6 +346,7 @@ export default function App() {
     setTxns([]);
     setLastSync(null);
     setShowAll(false);
+    setShowDupes(false);
     pushToast('All data cleared', 'info', {
       label: 'Undo',
       run: () => {
@@ -623,6 +628,41 @@ export default function App() {
               </>
             )}
           </motion.section>
+
+          {/* duplicates review */}
+          {dupes.length > 0 && (
+            <section className="card">
+              <button className="dupe-head" onClick={() => setShowDupes(!showDupes)}>
+                <span>
+                  🔁 {dupes.length} duplicate alert{dupes.length === 1 ? '' : 's'} ignored
+                </span>
+                <span className="link">{showDupes ? 'Hide' : 'Review'}</span>
+              </button>
+              {showDupes && (
+                <ul className="txns" style={{ marginTop: 12 }}>
+                  {dupes.slice(0, 50).map(({ txn, reason }) => (
+                    <li key={txn.id}>
+                      <span className="txn-meta">
+                        <strong>
+                          {inr(txn.amount, true)} · {txn.type}
+                        </strong>
+                        <small className="muted">
+                          {txn.sender} ·{' '}
+                          {new Date(txn.date).toLocaleString('en-IN', {
+                            day: 'numeric',
+                            month: 'short',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                          })}
+                        </small>
+                        <small className="muted">{reason}</small>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
 
           {/* recent */}
           {list.length > 0 && (
