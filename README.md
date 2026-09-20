@@ -97,6 +97,40 @@ Parsing is heuristic, so bank formats vary. Use the **Review** card to see what 
 - Totals are estimates based on message wording. Transfers between your own accounts and credit card bill payments may need manual judgement.
 - "Monthly" means the last 30 days.
 
+## 🍴 Fork it, make it yours
+
+This is an open-source project, and forks are welcome. To make your own version:
+
+1. **Fork** the repo on GitHub and clone it.
+2. **Change the app identity** in `capacitor.config.ts`:
+   - `appId` (for example `com.yourname.expensetracker`)
+   - `appName`
+3. **Add your Android platform:**
+   ```bash
+   npm install
+   npm run build
+   npx cap add android
+   npx cap sync android
+   ```
+4. **Tweak the brain:** categories and keywords live in `src/lib/parser.ts`. Add merchants, banks or categories that fit where you live.
+5. **Restyle it:** colors and spacing are design tokens at the top of `src/styles.css`.
+
+### 🌍 Using it outside India?
+
+The parser currently looks for ₹ / Rs / INR amounts and Indian bank alert wording. To adapt it, update the `AMOUNT`, `DEBIT`, `CREDIT` and `BALANCE` patterns and the currency formatter (`inr`) in `src/lib/parser.ts`.
+
+### ⚠️ Publishing to the Play Store
+
+Google restricts apps that request SMS permissions and may reject them unless you qualify for an exception. For personal use or sideloading, this doesn't apply.
+
+## 🤝 Contributing
+
+Contributions of all sizes are welcome: bug reports, new bank formats, category rules, UI polish.
+
+- Found a message that gets parsed wrongly? Open an issue with the SMS wording. **Blank out account numbers, names and reference numbers first.**
+- Want to add a feature? Open an issue to discuss it, then send a pull request.
+- See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
 ## 🗺️ Roadmap
 
 - [ ] Exclude own-account transfers and card bill payments
@@ -105,6 +139,12 @@ Parsing is heuristic, so bank formats vary. Use the **Review** card to see what 
 - [ ] CSV export
 - [ ] Calendar-month view
 
+## 👨‍💻 Author
+
+Built by **Sumanth A** ([@dawg-codes](https://github.com/dawg-codes)).
+
+If this helped you keep an eye on your spending, drop a ⭐ on the repo!
+
 ## 📄 License
 
-MIT
+MIT © Sumanth A. See [LICENSE](LICENSE). Free to use, fork and modify.
