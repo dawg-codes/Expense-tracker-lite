@@ -1,26 +1,27 @@
 {
   "name": "expense-tracker-lite",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "sync": "vite build && cap sync android"
   },
   "dependencies": {
-    "@capacitor/core": "^6.0.0",
-    "@capacitor/android": "^6.0.0",
+    "@capacitor/android": "^8.5.1",
+    "@capacitor/core": "^8.5.1",
     "@solimanware/capacitor-sms-reader": "git+https://github.com/solimanware/capacitor-sms-reader.git",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
   },
   "devDependencies": {
-    "@capacitor/cli": "^6.0.0",
-    "@types/react": "^18.3.3",
-    "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^4.3.1",
-    "typescript": "^5.2.2",
-    "vite": "^5.3.1"
+    "@capacitor/cli": "^8.5.1",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "latest",
+    "typescript": "latest",
+    "vite": "latest"
   }
 }
