@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'motion/react';
+import { DEFAULT_SORT, type SortKey } from './lib/activity';
 import { analyze } from './lib/analyze';
 import { BUILTIN_CATEGORIES, buildCategoryMap, catMeta } from './lib/categories';
 import { migrateFilter, periodHint, periodRange, previousPeriod, type Period, type Range } from './lib/dates';
 import { buildBackup, mergeBackup, saveFile, stamp, toCSV, type BackupData, type BackupFile } from './lib/exporter';
 import { inRange, summarize } from './lib/insights';
 import { learnedRule, ruleMatches, summarizeSync, upsertRule, type SyncSummary } from './lib/learning';
-import { parseSms } from './lib/parser';
+import { PARSER_VERSION, parseSms } from './lib/parser';
 import {
   KEYS,
   countStoredMessageText,
@@ -30,9 +31,11 @@ import { PeriodBar } from './components/PeriodBar';
 import { Review } from './components/Review';
 import { KIND_META, TxnDetail } from './components/txn';
 import { BottomNav, TABS } from './components/BottomNav';
+import { closeTopOverlay } from './components/nav';
 import { Empty, Icon, Sheet } from './components/ui';
 
 interface SmsReader {
+  checkPermissions?: () => Promise<Record<string, string>>;
   requestPermissions?: () => Promise<Record<string, string>>;
   getSMSList: (opts: object) => Promise<{ smsList?: RawSms[]; messages?: RawSms[] }>;
 }
@@ -108,6 +111,7 @@ export default function App() {
 
   const [tab, setTab] = useState<Tab>('home');
   const [filter, setFilter] = useState<ActivityFilter>(EMPTY_FILTER);
+  const [sort, setSort] = useState<SortKey>(DEFAULT_SORT);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [moreSheet, setMoreSheet] = useState<MoreSheet>(null);
   const [loading, setLoading] = useState(false);
@@ -115,6 +119,7 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [decisions, setDecisions] = useState<Array<Decision & { prev: Map<string, TxnOverrides | undefined>; prevRules?: MerchantRule[] }>>([]);
   const [syncSummary, setSyncSummary] = useState<SyncSummary | null>(null);
+  const [rulesVersion, setRulesVersion] = usePersisted<number>(KEYS.parserVersion, (v) => (typeof v === 'number' ? v : 1));
   const toastId = useRef(0);
 
   useEffect(() => {
@@ -122,9 +127,7 @@ export default function App() {
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#07080d' : '#f4f5fb');
   }, [theme]);
 
-  useEffect(() => {
-    window.scrollTo({ top: 0 });
-  }, [tab]);
+
 
   const dismissToast = useCallback((id: number) => setToasts((t) => t.filter((x) => x.id !== id)), []);
   const toast = useCallback(
@@ -298,19 +301,109 @@ export default function App() {
     [setDismissedRecurring, toast],
   );
 
-  const go = useCallback((t: Tab, f?: Partial<ActivityFilter>) => {
-    if (f) setFilter({ ...EMPTY_FILTER, ...f });
-    setTab(t);
+  /* ----- navigation with back history (see components/nav.ts) ----- */
+
+  interface NavEntry {
+    tab: Tab;
+    filter: ActivityFilter;
+    sort: SortKey;
+    scrollY: number;
+  }
+  const history = useRef<NavEntry[]>([]);
+  const pendingScroll = useRef<number | null>(null);
+  const here = (): NavEntry => ({ tab, filter, sort, scrollY: window.scrollY });
+
+  // after a screen change, scroll to the top, or back to where the user was
+  useLayoutEffect(() => {
+    window.scrollTo({ top: pendingScroll.current ?? 0 });
+    pendingScroll.current = null;
+  }, [tab]);
+
+  /** In-app navigation (e.g. Home → Activity filtered to Shopping). Back returns here. */
+  const go = useCallback(
+    (t: Tab, f?: Partial<ActivityFilter>) => {
+      history.current.push(here());
+      if (history.current.length > 30) history.current.shift();
+      if (f) setFilter({ ...EMPTY_FILTER, ...f });
+      setTab(t);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tab, filter, sort],
+  );
+
+  /** Bottom-nav switch: like Android apps, Back from any section returns to Home. */
+  const switchTab = useCallback(
+    (t: Tab) => {
+      if (t === tab) return window.scrollTo({ top: 0, behavior: 'smooth' });
+      history.current = t === 'home' ? [] : [{ tab: 'home', filter, sort, scrollY: 0 }];
+      setTab(t);
+    },
+    [tab, filter, sort],
+  );
+
+  /** Android Back / Escape. Returns false when there is nothing left to go back to. */
+  const back = useCallback((): boolean => {
+    if (closeTopOverlay()) return true;
+    const prev = history.current.pop();
+    if (prev) {
+      setFilter(prev.filter);
+      setSort(prev.sort);
+      pendingScroll.current = prev.scrollY;
+      if (prev.tab === tab) window.scrollTo({ top: prev.scrollY });
+      setTab(prev.tab);
+      return true;
+    }
+    if (tab !== 'home') {
+      setTab('home');
+      return true;
+    }
+    return false;
+  }, [tab]);
+
+  const backRef = useRef(back);
+  useEffect(() => {
+    backRef.current = back;
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') backRef.current();
+    };
+    window.addEventListener('keydown', onKey);
+    if (!Capacitor.isNativePlatform()) return () => window.removeEventListener('keydown', onKey);
+    // Android back button / gesture. Without a listener the Activity would simply close.
+    let remove: (() => void) | undefined;
+    let cancelled = false;
+    void import('@capacitor/app').then(async ({ App: CapApp }) => {
+      const handle = await CapApp.addListener('backButton', () => {
+        if (!backRef.current()) void CapApp.minimizeApp(); // root Home: behave like any Android app
+      });
+      if (cancelled) void handle.remove();
+      else remove = () => void handle.remove();
+    });
+    return () => {
+      cancelled = true;
+      window.removeEventListener('keydown', onKey);
+      remove?.();
+    };
   }, []);
 
   /* ----- sync ----- */
 
-  const syncSms = async () => {
+  /**
+   * Reads the inbox and merges new transactions. `auto` is the silent one-time
+   * re-check after detection rules improve: it never prompts for permission
+   * and never shows errors.
+   */
+  const syncSms = async ({ auto = false }: { auto?: boolean } = {}) => {
     if (loading) return;
     setLoading(true);
-    setError(null);
+    if (!auto) setError(null);
     try {
-      if (!Capacitor.isNativePlatform()) {
+      if (auto) {
+        if (!Capacitor.isNativePlatform() || typeof SMSInboxReader.checkPermissions !== 'function') return;
+        const perm = await SMSInboxReader.checkPermissions();
+        if (!Object.values(perm ?? {}).some((v) => v === 'granted')) return;
+      } else if (!Capacitor.isNativePlatform()) {
         setError({
           kind: 'unavailable',
           message: 'SMS access only works in the Android app. Open the installed app on your phone to sync.',
@@ -318,7 +411,7 @@ export default function App() {
         return;
       }
 
-      if (typeof SMSInboxReader.requestPermissions === 'function') {
+      if (!auto && typeof SMSInboxReader.requestPermissions === 'function') {
         const perm = await SMSInboxReader.requestPermissions();
         if (Object.values(perm ?? {}).some((v) => v === 'denied')) {
           setError({
@@ -346,17 +439,25 @@ export default function App() {
       const all = [...merged.values()].sort((a, b) => b.date - a.date);
       const known = new Set(txns.map((t) => t.id));
       const newIds = parsed.filter((t) => !known.has(t.id)).map((t) => t.id);
-      const summary = summarizeSync(analyze(all, rules, cats, dismissedRecurring), newIds);
+      const after = analyze(all, rules, cats, dismissedRecurring);
+      const summary = summarizeSync(after, newIds);
+      // stored transactions (as previously saved) that the current rules now treat as card bill payments
+      summary.reclassified = txns.filter((t) => t.type !== 'card_payment' && !t.user?.type && after.byId.get(t.id)?.kind === 'card_payment').length;
       setTxns(all);
       setLastSync(Date.now());
       setSyncSummary(summary);
+      setRulesVersion(PARSER_VERSION);
+      const fixed = summary.reclassified ? ` · ${summary.reclassified} older card bill payment${summary.reclassified === 1 ? '' : 's'} excluded` : '';
       toast(
         summary.newCount
-          ? `Synced ${summary.newCount} new transaction${summary.newCount === 1 ? '' : 's'} · ${summary.attention ? `${summary.attention} need${summary.attention === 1 ? 's' : ''} you` : 'all handled'}`
-          : 'You are up to date. No new transactions.',
+          ? `Synced ${summary.newCount} new transaction${summary.newCount === 1 ? '' : 's'} · ${summary.attention ? `${summary.attention} need${summary.attention === 1 ? 's' : ''} you` : 'all handled'}${fixed}`
+          : auto
+            ? `Re-checked your transactions with improved detection${fixed || ' · nothing changed'}`
+            : `You are up to date. No new transactions.${fixed}`,
         'success',
       );
     } catch (err: unknown) {
+      if (auto) return;
       const msg = (err instanceof Error && err.message) || 'Could not read your SMS inbox.';
       const perm = /permission|denied/i.test(msg);
       setError({ kind: perm ? 'permission' : 'generic', message: perm ? 'SMS permission is required. Enable it in your phone settings and try again.' : msg });
@@ -364,6 +465,16 @@ export default function App() {
       setLoading(false);
     }
   };
+
+  // One-time re-check when detection rules have improved since the data was synced.
+  const rulesOutdated = txns.length > 0 && rulesVersion < PARSER_VERSION;
+  const autoChecked = useRef(false);
+  useEffect(() => {
+    if (!rulesOutdated || autoChecked.current) return;
+    autoChecked.current = true;
+    void syncSms({ auto: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rulesOutdated]);
 
   /* ----- data management ----- */
 
@@ -467,6 +578,9 @@ export default function App() {
     undo,
     syncSummary,
     dismissSyncSummary: () => setSyncSummary(null),
+    rulesOutdated,
+    sync: () => void syncSms(),
+    syncing: loading,
     saveRule,
     deleteRule,
     saveCategory,
@@ -523,7 +637,7 @@ export default function App() {
             </div>
             <div className="header-actions">
               {hasData && (
-                <motion.button className="sync-btn" onClick={syncSms} disabled={loading} whileTap={{ scale: 0.96 }} aria-label="Sync new messages">
+                <motion.button className="sync-btn" onClick={() => syncSms()} disabled={loading} whileTap={{ scale: 0.96 }} aria-label="Sync new messages">
                   <Icon name="sync" size={15} className={loading ? 'spin' : ''} />
                   Sync
                 </motion.button>
@@ -548,7 +662,7 @@ export default function App() {
                     <strong>{error.kind === 'permission' ? 'Permission needed' : error.kind === 'unavailable' ? 'Not available here' : 'Something went wrong'}</strong>
                     <p>{error.message}</p>
                     {error.kind !== 'unavailable' && (
-                      <button className="link" onClick={syncSms}>
+                      <button className="link" onClick={() => syncSms()}>
                         Try again
                       </button>
                     )}
@@ -569,7 +683,7 @@ export default function App() {
           ) : !hasData && tab !== 'more' ? (
             <Empty emoji="📭" title="No transactions yet">
               Sync your banking SMS and I’ll turn your bank alerts into a clean spending summary. Nothing ever leaves your phone.
-              <button className="btn-primary" onClick={syncSms} disabled={loading}>
+              <button className="btn-primary" onClick={() => syncSms()} disabled={loading}>
                 <Icon name="sync" className={loading ? 'spin' : ''} />
                 {loading ? 'Reading your SMS…' : 'Sync banking SMS'}
               </button>
@@ -577,8 +691,8 @@ export default function App() {
           ) : (
             <motion.main key={tab} className="tab-body" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.18 }}>
               {tab === 'home' && <Home data={periodData} />}
-              {tab === 'activity' && <Activity base={periodData.list} all={analysis.all} filter={filter} setFilter={setFilter} />}
-              {tab === 'insights' && <Insights data={periodData} all={analysis.all} onEditBudgets={() => (setTab('more'), setMoreSheet('budgets'))} />}
+              {tab === 'activity' && <Activity base={periodData.list} all={analysis.all} filter={filter} setFilter={setFilter} sort={sort} setSort={setSort} />}
+              {tab === 'insights' && <Insights data={periodData} all={analysis.all} onEditBudgets={() => (go('more'), setMoreSheet('budgets'))} />}
               {tab === 'review' && <Review />}
               {tab === 'more' && (
                 <More
@@ -597,7 +711,7 @@ export default function App() {
             </motion.main>
           )}
 
-          <BottomNav tab={tab} onChange={setTab} reviewCount={reviewCount} />
+          <BottomNav tab={tab} onChange={switchTab} reviewCount={reviewCount} />
 
           <Sheet open={!!detailId} onClose={() => setDetailId(null)} title="Transaction">
             {detailId && <TxnDetail key={detailId} id={detailId} onClose={() => setDetailId(null)} />}

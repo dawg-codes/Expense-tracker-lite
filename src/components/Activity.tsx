@@ -1,9 +1,10 @@
 import { useDeferredValue, useMemo, useState } from 'react';
+import { DEFAULT_SORT, SORTS, filterTxns, sortTxns, type Labels, type SortKey } from '../lib/activity';
 import { catMeta } from '../lib/categories';
 import { inr } from '../lib/parser';
 import type { TxnView } from '../lib/types';
 import { EMPTY_FILTER, useApp, type ActivityFilter } from './context';
-import { KIND_META, TxnRow } from './txn';
+import { KIND_META, TxnRow, displayName } from './txn';
 import { Icon, Sheet } from './ui';
 
 const KINDS: Array<[string, string]> = [
@@ -16,27 +17,13 @@ const KINDS: Array<[string, string]> = [
 ];
 const PAGE = 60;
 
-/** Matches merchant, category, sender, account, reference or amount ("840" finds ₹840.00). */
-export function matches(v: TxnView, q: string, catLabel: string): boolean {
-  if (!q) return true;
-  const digits = q.replace(/[₹,\s]/g, '');
-  if (/^\d+(\.\d+)?$/.test(digits)) {
-    const amt = v.amount.toFixed(2);
-    if (amt.startsWith(digits) || String(Math.round(v.amount)) === digits) return true;
-    if (v.ref?.includes(digits) || v.account?.includes(digits)) return true;
-  }
-  const hay = `${v.name} ${v.merchantRaw ?? ''} ${catLabel} ${v.sender} ${KIND_META[v.kind].label}`.toLowerCase();
-  return q
-    .toLowerCase()
-    .split(/\s+/)
-    .every((w) => hay.includes(w));
-}
-
 export function Activity({
   base,
   all,
   filter,
   setFilter,
+  sort,
+  setSort,
 }: {
   /** Transactions in the selected period. */
   base: TxnView[];
@@ -44,30 +31,25 @@ export function Activity({
   all: TxnView[];
   filter: ActivityFilter;
   setFilter: (f: ActivityFilter) => void;
+  sort: SortKey;
+  setSort: (s: SortKey) => void;
 }) {
   const { cats, catList, maskIncome, openTxn } = useApp();
   const [limit, setLimit] = useState(PAGE);
   const [sheet, setSheet] = useState(false);
+  const [sortSheet, setSortSheet] = useState(false);
   const query = useDeferredValue(filter.query.trim());
 
   const senders = useMemo(() => [...new Set(all.map((v) => v.sender))].sort(), [all]);
 
-  const results = useMemo(() => {
-    const src = filter.allTime ? all : base;
-    const only = filter.ids ? new Set(filter.ids) : null;
-    return src.filter((v) => {
-      if (only && !only.has(v.id)) return false;
-      // duplicate alerts are hidden unless asked for
-      const showDupes = filter.kinds.includes('duplicate');
-      if (v.dupOf && !showDupes) return false;
-      if (filter.kinds.length && !filter.kinds.includes(v.dupOf ? 'duplicate' : v.kind)) return false;
-      if (filter.category && v.cat !== filter.category) return false;
-      if (filter.sender && v.sender !== filter.sender) return false;
-      if (filter.min !== undefined && v.amount < filter.min) return false;
-      if (filter.max !== undefined && v.amount > filter.max) return false;
-      return matches(v, query, catMeta(cats, v.cat).label);
-    });
-  }, [filter, query, base, all, cats]);
+  const labels = useMemo<Labels>(
+    () => ({ category: (id) => catMeta(cats, id).label, kind: (v) => KIND_META[v.kind].label, name: (v) => displayName(v, cats) }),
+    [cats],
+  );
+  // filter, then sort: one pipeline so the two never disagree
+  const filteredList = useMemo(() => filterTxns(filter.allTime ? all : base, filter, query, labels), [filter, query, base, all, labels]);
+  const results = useMemo(() => (sort === DEFAULT_SORT ? filteredList : sortTxns(filteredList, sort, labels.name)), [filteredList, sort, labels]);
+  const sortLabel = SORTS.find(([k]) => k === sort)?.[1] ?? '';
 
   const total = useMemo(
     () => results.reduce((acc, v) => (v.counted ? acc + (v.kind === 'income' ? 0 : v.kind === 'refund' ? -v.amount : v.amount) : acc), 0),
@@ -93,7 +75,7 @@ export function Activity({
         <input
           type="search"
           inputMode="search"
-          placeholder="Search merchant, amount, bank…"
+          placeholder="Search merchant or amount"
           value={filter.query}
           onChange={(e) => {
             setFilter({ ...filter, query: e.target.value });
@@ -101,12 +83,20 @@ export function Activity({
           }}
           aria-label="Search transactions"
         />
-        <button className={`icon-btn small ${chips.length ? 'badge-dot' : ''}`} onClick={() => setSheet(true)} aria-label="More filters">
+        <button className={`icon-btn small ${sort !== DEFAULT_SORT ? 'badge-dot' : ''}`} onClick={() => setSortSheet(true)} aria-label={`Sort: ${sortLabel}`}>
+          <Icon name="sort" size={16} />
+        </button>
+        <button className={`icon-btn small ${chips.length ? 'badge-dot' : ''}`} onClick={() => setSheet(true)} aria-label="Filters">
           <Icon name="filter" size={15} />
         </button>
       </div>
 
       <div className="chip-row">
+        {sort !== DEFAULT_SORT && (
+          <button className="pill active" onClick={() => setSort(DEFAULT_SORT)} aria-label={`Remove sort ${sortLabel}`}>
+            <Icon name="sort" size={12} /> {sortLabel} <Icon name="x" size={12} />
+          </button>
+        )}
         {KINDS.map(([k, label]) => (
           <button key={k} className={`pill ${filter.kinds.includes(k) ? 'active' : ''}`} onClick={() => toggleKind(k)} aria-pressed={filter.kinds.includes(k)}>
             {label}
@@ -146,6 +136,27 @@ export function Activity({
           </button>
         )}
       </section>
+
+      <Sheet open={sortSheet} onClose={() => setSortSheet(false)} title="Sort by">
+        <div className="option-list" role="radiogroup" aria-label="Sort by">
+          {SORTS.map(([key, label]) => (
+            <button
+              key={key}
+              role="radio"
+              aria-checked={sort === key}
+              className={`option ${sort === key ? 'active' : ''}`}
+              onClick={() => {
+                setSort(key);
+                setLimit(PAGE);
+                setSortSheet(false);
+              }}
+            >
+              <span className="radio" aria-hidden="true" />
+              {label}
+            </button>
+          ))}
+        </div>
+      </Sheet>
 
       <Sheet open={sheet} onClose={() => setSheet(false)} title="Filters">
         <p className="label">Dates</p>

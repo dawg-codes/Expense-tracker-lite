@@ -7,20 +7,8 @@ import type { Budgets, CategoryDef, MerchantRule, TxnOverrides, TxnType, TxnView
 
 export type Tab = 'home' | 'activity' | 'insights' | 'review' | 'more';
 
-export interface ActivityFilter {
-  query: string;
-  kinds: string[];
-  category?: string;
-  sender?: string;
-  min?: number;
-  max?: number;
-  allTime: boolean;
-  /** Restrict to these transactions (e.g. "from the last sync"). */
-  ids?: string[];
-  idsLabel?: string;
-}
-
-export const EMPTY_FILTER: ActivityFilter = { query: '', kinds: [], allTime: false };
+export { EMPTY_FILTER, type ActivityFilter } from '../lib/activity';
+import type { ActivityFilter } from '../lib/activity';
 
 export interface ToastAction {
   label: string;
@@ -58,6 +46,10 @@ export interface AppCtx {
   learn: (ids: string[], sample: TxnView, change: { category?: string; type?: TxnType }, applyToAll: boolean, label: string) => void;
   syncSummary: SyncSummary | null;
   dismissSyncSummary: () => void;
+  /** Detection rules improved since the last sync: a sync will re-check stored transactions. */
+  rulesOutdated: boolean;
+  sync: () => void;
+  syncing: boolean;
   undo: (decisionId: number) => void;
   saveRule: (rule: MerchantRule) => void;
   deleteRule: (id: string) => void;

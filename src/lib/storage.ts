@@ -25,11 +25,12 @@ export const KEYS = {
   categories: 'et:categories',
   budgets: 'et:budgets',
   dismissedRecurring: 'et:recurring:dismissed',
+  parserVersion: 'et:parserVersion',
 } as const;
 
 const TYPES: TxnType[] = ['expense', 'income', 'transfer', 'refund', 'card_payment', 'unknown'];
-const TAGS: ParseTag[] = ['self', 'refund', 'card', 'cc', 'cc_bill', 'emi', 'autopay', 'rail', 'weak'];
-const FLAGS: FlagKind[] = ['duplicate', 'transfer', 'refund', 'uncategorised', 'unknown_type', 'low_confidence', 'card_payment'];
+const TAGS: ParseTag[] = ['self', 'refund', 'card', 'cc', 'cc_bill', 'cc_maybe', 'emi', 'autopay', 'rail', 'weak'];
+const FLAGS: FlagKind[] = ['duplicate', 'transfer', 'refund', 'uncategorised', 'unknown_type', 'low_confidence', 'card_payment', 'maybe_card_payment'];
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);

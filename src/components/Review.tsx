@@ -17,8 +17,13 @@ const GROUPS: Record<FlagKind, { emoji: string; title: string; hint: string }> =
   card_payment: { emoji: '💳', title: 'Card bill payment', hint: 'Not counted as spending, but no card purchases have been recorded for this card.' },
   uncategorised: { emoji: '🏷️', title: 'Needs category', hint: 'Payees we could not place. Choose once and every payment to them (past and future) follows.' },
   low_confidence: { emoji: '🧐', title: 'Unusual wording', hint: 'The alert used only abbreviations. Check that it is a real transaction.' },
+  maybe_card_payment: {
+    emoji: '💳',
+    title: 'Possible card bill payment',
+    hint: 'Money went to a card number without clear bill wording. Still counted as spending until you confirm.',
+  },
 };
-const ORDER: FlagKind[] = ['uncategorised', 'duplicate', 'transfer', 'refund', 'unknown_type', 'card_payment', 'low_confidence'];
+const ORDER: FlagKind[] = ['maybe_card_payment', 'uncategorised', 'duplicate', 'transfer', 'refund', 'unknown_type', 'card_payment', 'low_confidence'];
 const QUICK_CATS = ['Groceries', 'Food', 'Shopping', 'People', 'Transport', 'Bills', 'Home', 'Health', 'Family'];
 
 /* ---------- one payee, many transactions ---------- */
@@ -140,6 +145,21 @@ function ReviewCard({ item }: { item: ReviewItem }) {
         </button>
       );
       break;
+    case 'maybe_card_payment':
+      confirm = (
+        <button
+          className="btn-small"
+          onClick={() => decide([v.id], (p) => mergeUser(dismissFlag(p, 'maybe_card_payment'), { type: 'card_payment', reviewed: true }), 'Marked as card bill payment')}
+        >
+          💳 It's a card bill
+        </button>
+      );
+      alt = (
+        <button className="btn-small ghost" onClick={() => one((p) => mergeUser(dismissFlag(p, 'maybe_card_payment'), { reviewed: true }), 'Kept as spending')}>
+          It's a purchase
+        </button>
+      );
+      break;
     case 'unknown_type':
       confirm = (
         <>
@@ -211,6 +231,8 @@ function bulkConfirm(kind: FlagKind, items: ReviewItem[]): { label: string; ids:
       return { label: `Confirm all ${ids.length} duplicates`, ids, patch: (p) => mergeUser(dismissFlag(p, 'duplicate'), { reviewed: true }) };
     case 'card_payment':
       return { label: `Keep all ${ids.length} out of spending`, ids, patch: (p) => mergeUser(dismissFlag(p, 'card_payment'), { reviewed: true }) };
+    case 'maybe_card_payment':
+      return { label: `All ${ids.length} are card bills`, ids, patch: (p) => mergeUser(dismissFlag(p, 'maybe_card_payment'), { type: 'card_payment', reviewed: true }) };
     case 'transfer': {
       const all = [...new Set(items.flatMap((i) => [i.txn.id, i.flag.relatedId].filter((x): x is string => !!x)))];
       return { label: `Mark all as transfers`, ids: all, patch: (p) => mergeUser(dismissFlag(p, 'transfer'), { type: 'transfer', reviewed: true }) };

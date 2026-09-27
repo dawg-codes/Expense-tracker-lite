@@ -20,6 +20,7 @@ export type ParseTag =
   | 'card' // paid with a card
   | 'cc' // credit-card specific wording
   | 'cc_bill' // payment towards a credit-card bill
+  | 'cc_maybe' // money sent to a card, but no clear bill wording
   | 'emi' // EMI / loan instalment wording
   | 'autopay' // mandate / standing instruction
   | 'rail' // IMPS / NEFT / RTGS wording
@@ -72,7 +73,7 @@ export interface Txn {
   user?: TxnOverrides;
 }
 
-export type FlagKind = 'duplicate' | 'transfer' | 'refund' | 'uncategorised' | 'unknown_type' | 'low_confidence' | 'card_payment';
+export type FlagKind = 'duplicate' | 'transfer' | 'refund' | 'uncategorised' | 'unknown_type' | 'low_confidence' | 'card_payment' | 'maybe_card_payment';
 
 export interface Flag {
   kind: FlagKind;

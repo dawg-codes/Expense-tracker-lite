@@ -81,6 +81,7 @@ export function SyncStatus() {
     ['Own-account transfers excluded', s.transfers, () => go('activity', { ...fromSync, kinds: ['transfer'] })],
     ['Refunds matched', s.refunds, () => go('activity', { ...fromSync, kinds: ['refund'] })],
     ['Card bill payments excluded', s.cardPayments, () => go('activity', { ...fromSync, kinds: ['card_payment'] })],
+    ['Older card bill payments re-classified', s.reclassified ?? 0, () => go('activity', { allTime: true, kinds: ['card_payment'] })],
   ];
   const tap = (fn: () => void) => () => {
     setOpen(false);
@@ -96,12 +97,13 @@ export function SyncStatus() {
             <>
               <b>{s.newCount.toLocaleString('en-IN')} new</b> · {handled.toLocaleString('en-IN')} handled automatically
               {s.attention ? ` · ${s.attention} need attention` : ''}
+              {s.reclassified ? ` · ${s.reclassified} older card bills excluded` : ''}
             </>
           ) : (
             <b>Up to date</b>
           )}
         </span>
-        {s.newCount > 0 && (
+        {(s.newCount > 0 || !!s.reclassified) && (
           <button className="link" onClick={() => setOpen(true)}>
             Details
           </button>
@@ -132,5 +134,22 @@ export function SyncStatus() {
         </ul>
       </Sheet>
     </>
+  );
+}
+
+/** Shown when detection rules improved but the one-time re-check couldn't run automatically. */
+export function RulesUpdateNotice() {
+  const { rulesOutdated, sync, syncing } = useApp();
+  if (!rulesOutdated) return null;
+  return (
+    <div className="sync-status" role="status">
+      <Icon name="spark" size={15} className="warn" />
+      <span className="grow">
+        <b>Card bill detection improved.</b> Sync once to re-check older transactions.
+      </span>
+      <button className="link" onClick={sync} disabled={syncing}>
+        Sync
+      </button>
+    </div>
   );
 }

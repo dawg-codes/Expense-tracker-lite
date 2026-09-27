@@ -5,6 +5,7 @@ import { learnByDefault, newRuleId } from '../lib/learning';
 import { inr } from '../lib/parser';
 import type { TxnType, TxnView } from '../lib/types';
 import { dismissFlag, mergeUser, useApp } from './context';
+import { useBackHandler } from './nav';
 import { Icon, Toggle, longDate, shortDate } from './ui';
 
 export const KIND_META: Record<TxnType, { label: string; emoji: string }> = {
@@ -110,6 +111,9 @@ export function TxnDetail({ id, onClose }: { id: string; onClose: () => void }) 
   const [picking, setPicking] = useState(false);
   const [applyAll, setApplyAll] = useState(() => (v ? learnByDefault(v) : true));
   const [renaming, setRenaming] = useState(false);
+  // inline editors close before the sheet does
+  useBackHandler(picking, () => setPicking(false));
+  useBackHandler(renaming, () => setRenaming(false));
   const [name, setName] = useState(v?.name ?? '');
 
   if (!v) return <p className="muted center pad">This transaction no longer exists.</p>;
@@ -350,4 +354,5 @@ export const FLAG_TEXT: Record<string, string> = {
   unknown_type: 'Not sure if money went out or came in',
   low_confidence: 'Unusual wording, please double-check',
   card_payment: 'Card bill payment not counted as spending',
+  maybe_card_payment: 'Might be a credit-card bill payment',
 };
