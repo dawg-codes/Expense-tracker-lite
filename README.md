@@ -38,11 +38,13 @@ Expense Tracker Lite reads the banking alerts already sitting in your phone's in
 | ↔️ **Own-account transfers** | A debit on one account and a matching credit on another within minutes is shown as an internal transfer, not spending. Looser matches go to Review instead |
 | ↩️ **Refunds** | Refunds are linked to the original purchase and netted out of spending. Same-amount credits from a merchant are suggested as *possible* refunds |
 | 💳 **Card bill payments** | Paying your credit-card bill isn't counted as spending (the card purchases are). If no card spending was ever recorded, Review asks you |
-| 🧐 **Review center** | Possible duplicates, transfers, refunds, unknown merchants and unclear messages, each with one-tap Confirm / Reject / Change category / Mark transfer / Mark refund / Exclude, plus **Undo** |
+| 🤖 **Auto-resolution** | Everything that can be determined confidently is handled for you: duplicate alerts, own-account transfers, refunds, card bill payments, known merchants and payee names ("… STORES" → Groceries, a person's name → People). After each sync you see what was handled |
+| 🧐 **Review, only when needed** | Only genuinely ambiguous transactions are asked about, grouped by reason and by payee so one tap resolves many ("ABC STORES · 14 transactions · ₹8,420 → Categorise all"). Confirm / Change / Ignore / Exclude, with **Undo** |
+| 🧠 **Learns from you** | Correcting a category, or marking a transfer or refund, creates a local rule for that payee, so past and future payments follow automatically |
 | 🔎 **Search & filters** | Search by merchant, amount (`840`), bank or reference. Filter by type, category, sender, amount range and dates |
 | 🧾 **Transaction details** | Type, category, merchant, "as written" payee, sender, masked account, reference, confidence and status, all editable |
-| 📌 **Custom merchant rules** | "If merchant contains *MURUGAN STORES* → Groceries". Rules beat automatic categorisation and apply to history too. Create them from a transaction, from Review or in *More* |
-| 🗂️ **Categories** | 17 built-in (incl. Groceries, Insurance, Subscriptions, Education) plus your own custom categories |
+| 📌 **Merchant rules** | "*ABC STORES* → Groceries" or "*MY SAVINGS* → Transfer". Whole-word matching; your rules beat learned ones, which beat automatic detection. Manage them in *More → Merchant rules* |
+| 🗂️ **Categories** | 18 built-in (incl. Groceries, Insurance, Subscriptions, Education, People) plus your own custom categories |
 | 🔄 **Recurring payments** | Conservative detection of EMIs, insurance, subscriptions and rent (same merchant, similar amount, regular interval), with an estimated monthly commitment. Dismiss anything that's wrong |
 | 🎯 **Budgets** | Optional monthly total and per-category budgets with progress bars |
 | 📈 **Trends** | 6-month spent vs income chart, category changes vs last period, top merchants |
@@ -63,7 +65,19 @@ Expense Tracker Lite reads the banking alerts already sitting in your phone's in
 7. **Confidence** (0 → 1) combines "is this really a transaction?" with "do we know what it was for?". It's a heuristic, not a probability. The app only shows it as *High / Medium / Needs review*.
 8. **Analysis pass** (derived, never stored, so fixes apply to history): duplicate detection, transfer pairing, refund linking, card-payment checks, review flags and recurring detection.
 
-When unsure, the app **doesn't guess**: totals stay unchanged and the item goes to Review.
+## 🤖 What goes to Review (and what doesn't)
+
+Every transaction ends up in one of three tiers:
+
+| Tier | Meaning | Examples |
+|---|---|---|
+| **High** | Certain, resolved silently | Same reference number, identical alert, known merchant, refund wording, "IMPS to A/c XX9876" where XX9876 is your own account, credit-card bill payment when card spends are recorded |
+| **Medium** | Resolved by a reliable heuristic | Bank + payment-app alert for the same payment (same account or merchant), matching debit/credit on two of your accounts within 2 h, category from the payee's name, a known merchant returning the exact amount of a purchase (refund), small one-off payments to unknown payees kept in *Other* |
+| **Review** | Genuinely ambiguous: you decide, and totals stay as-is until then | Two *different banks* reporting the same amount minutes apart; a possible transfer with no account match; an unknown payee sending back the exact amount; a transaction with no direction; an unknown payee you pay repeatedly (≥ 3 times or ≥ ₹2,000), asked **once per payee** |
+
+On a realistic 8-month test inbox (617 transactions), Review went from 286 items to 35, which take 7 decisions, and every automatic decision matched the ground truth (`auto-resolve.test.ts`).
+
+Detection runs on stored fields, so improvements apply to past transactions too. New fields such as the counter-account are filled in the next time you sync.
 
 ## 🗄️ Data model & migration
 
@@ -112,7 +126,7 @@ src/
 
 ## 🧪 Testing
 
-`npm test` runs 100+ tests covering: expenses and income, balance/OTP/failed-transaction exclusion, duplicate detection, merchant normalisation, transfer, refund and credit-card-payment detection, category rules, ambiguous messages, custom merchant rules, recurring detection, calendar boundaries (Sep 1 / Sep 30 / Oct 1), v2 → v3 migration, CSV escaping and backup validation. `regression.test.ts` pins the original v2 parser behaviour.
+`npm test` runs 130+ tests covering: automatic resolution on a realistic 600-transaction inbox (nothing high-confidence reaches Review, every auto-decision matches ground truth), learning & bulk rules, expenses and income, balance/OTP/failed-transaction exclusion, duplicate detection, merchant normalisation, transfer, refund and credit-card-payment detection, category rules, ambiguous messages, custom merchant rules, recurring detection, calendar boundaries (Sep 1 / Sep 30 / Oct 1), v2 → v3 migration, CSV escaping and backup validation. `regression.test.ts` pins the original v2 parser behaviour.
 
 ## ⚠️ Good to know
 
@@ -154,6 +168,10 @@ Contributions of all sizes are welcome: bug reports, new bank formats, category 
 - Found a message that gets parsed wrongly? Open an issue with the SMS wording. **Blank out account numbers, names and reference numbers first.**
 - Want to add a feature? Open an issue to discuss it, then send a pull request.
 - See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
+## 🎨 App icon
+
+A message bubble carrying a ₹ on the purple → blue brand gradient: bank SMS in, money insight out. The source files are `resources/icon.svg` and `resources/icon-foreground.svg`. The Android adaptive icon (vector background, foreground and a monochrome layer for themed icons) and legacy PNGs live in `resources/android/res`. CI copies them into the generated Android project.
 
 ## 🗺️ Roadmap
 

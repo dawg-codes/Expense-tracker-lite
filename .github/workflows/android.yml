@@ -40,6 +40,11 @@ jobs:
         sed -i 's|android:allowBackup="true"|android:allowBackup="false"|' android/app/src/main/AndroidManifest.xml
         grep -q 'android:allowBackup="false"' android/app/src/main/AndroidManifest.xml
 
+    - name: Apply app icon
+      run: |
+        cp -r resources/android/res/. android/app/src/main/res/
+        test -f android/app/src/main/res/drawable/ic_launcher_monochrome.xml
+
     - name: Sync Capacitor
       run: npx cap sync android
 

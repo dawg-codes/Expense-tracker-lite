@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Message bubble + rupee, inside the 66dp adaptive-icon safe zone. Source: resources/icon-foreground.svg -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M43,34 H65 A11,11 0 0 1 76,45 V59 A11,11 0 0 1 65,70 H50 L39,79 L43,70 A11,11 0 0 1 32,59 V45 A11,11 0 0 1 43,34 Z"/>
+    <path android:strokeColor="#FF5847E8" android:strokeWidth="4.2" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M46,43.5 H62"/>
+    <path android:strokeColor="#FF5847E8" android:strokeWidth="4.2" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M46,49.5 H62"/>
+    <path android:strokeColor="#FF5847E8" android:strokeWidth="4.2" android:strokeLineCap="round" android:strokeLineJoin="round" android:pathData="M50.5,43.5 C57,43.5 57,55.5 50.5,55.5 H46.5 L57,63"/>
+</vector>
