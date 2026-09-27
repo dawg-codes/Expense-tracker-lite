@@ -13,6 +13,7 @@
  */
 import type { CategoryMap } from './categories';
 import { dedupe, isBankSender } from './parser';
+import { isCardBillPayee } from './cardPayments';
 import { KNOWN_NAMES, inferCategoryFromName, merchantKey } from './merchants';
 import { detectRecurring, type RecurringSeries } from './recurring';
 import type { Flag, FlagKind, MerchantRule, Txn, TxnView } from './types';
@@ -59,7 +60,7 @@ export interface ReviewItem {
   flag: Flag;
 }
 
-const FLAG_PRIORITY: FlagKind[] = ['duplicate', 'unknown_type', 'transfer', 'refund', 'card_payment', 'uncategorised', 'low_confidence'];
+const FLAG_PRIORITY: FlagKind[] = ['duplicate', 'unknown_type', 'maybe_card_payment', 'transfer', 'refund', 'card_payment', 'uncategorised', 'low_confidence'];
 
 /* ---------- rules ---------- */
 
@@ -102,7 +103,9 @@ function dismissed(t: Txn, kind: FlagKind): boolean {
 function baseView(t: Txn, compiled: Compiled[], cats: CategoryMap): TxnView {
   const u = t.user ?? {};
   const rule = matchRule(t, compiled);
-  const kind = u.type ?? rule?.type ?? t.type;
+  // Stored before the current card rules: the saved payee alone can prove a card bill payment.
+  const storedCardBill = !u.type && !rule?.type && t.type === 'expense' && t.direction === 'debit' && isCardBillPayee(t.merchant, t.merchantRaw);
+  const kind = u.type ?? rule?.type ?? (storedCardBill ? 'card_payment' : t.type);
   let cat = u.category ?? rule?.category ?? t.category;
   if (!u.category && !rule?.category) {
     // parser category is only a fallback: keep types coherent with a changed type
@@ -119,7 +122,11 @@ function baseView(t: Txn, compiled: Compiled[], cats: CategoryMap): TxnView {
     ruleId: rule?.id,
     catByRule: !!rule?.category && !u.category,
     linkedId: u.linkedId,
-    autoNote: rule ? `${rule.learned ? 'Learned from your earlier choice' : 'Your rule'}: “${rule.match}”` : undefined,
+    autoNote: rule
+      ? `${rule.learned ? 'Learned from your earlier choice' : 'Your rule'}: “${rule.match}”`
+      : storedCardBill
+        ? 'Credit-card bill payment (recognised from the payee)'
+        : undefined,
     tier: 'high',
     flags: [],
     counted: false,
@@ -174,14 +181,19 @@ export function analyze(
   /* 4. refunds */
   linkRefunds(live);
 
-  /* 5. credit-card bill payments: fine to exclude once we know your card spending is recorded */
-  const cardEvidence = live.filter((v) => (v.kind === 'expense' && v.tags?.includes('card')) || (v.kind === 'card_payment' && v.direction === 'credit'));
+  /* 5. credit-card bill payments: excluded from spending, never a question when the wording is clear */
   for (const v of live) {
-    if (v.kind !== 'card_payment') continue;
-    v.autoNote = 'Credit-card bill payment: the card purchases themselves are counted';
-    if (v.direction !== 'debit' || v.user?.reviewed || v.user?.type || dismissed(v, 'card_payment')) continue;
-    const seen = cardEvidence.some((e) => e.date <= v.date + 5 * DAY && v.date - e.date <= 60 * DAY);
-    if (!seen) v.flags.push({ kind: 'card_payment', note: 'No card spending recorded before this bill payment' });
+    if (v.kind === 'card_payment') {
+      v.autoNote ??=
+        v.direction === 'debit'
+          ? 'Credit-card bill payment: not counted, because the card purchases themselves are counted'
+          : 'Your card issuer confirming a bill payment: not income';
+      continue;
+    }
+    // money sent to a card without clear bill wording: ask, but keep totals as they are
+    if (v.tags?.includes('cc_maybe') && v.kind === 'expense' && !v.user?.reviewed && !v.user?.type && !dismissed(v, 'maybe_card_payment')) {
+      v.flags.push({ kind: 'maybe_card_payment', note: 'Money went to a card number. Was this a card bill payment?' });
+    }
   }
 
   /* 6. remaining per-transaction questions */
@@ -197,7 +209,7 @@ export function analyze(
     if (!decided && v.kind === 'expense' && !v.name && v.cat === 'Other' && v.tags?.includes('rail') && v.amount >= LONE_TRANSFER_MIN && !dismissed(v, 'transfer')) {
       v.flags.push({ kind: 'transfer', note: 'Large bank transfer with no payee named' });
     }
-    if (v.kind === 'expense' && v.cat === 'Other' && !isKnownMerchant(v) && !userCat(v) && !decided && !dismissed(v, 'uncategorised')) {
+    if (v.kind === 'expense' && v.cat === 'Other' && !v.tags?.includes('cc_maybe') && !isKnownMerchant(v) && !userCat(v) && !decided && !dismissed(v, 'uncategorised')) {
       const k = merchantKey(v.name);
       if (k) {
         const g = otherGroups.get(k) ?? [];

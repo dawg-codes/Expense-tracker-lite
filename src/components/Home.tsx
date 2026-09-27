@@ -4,7 +4,7 @@ import { periodScope } from '../lib/dates';
 import { headlineInsights } from '../lib/insights';
 import { useApp } from './context';
 import { DashboardHero, type PeriodData } from './DashboardHero';
-import { InsightList, ReviewSummary, SyncStatus } from './HomeSections';
+import { InsightList, ReviewSummary, RulesUpdateNotice, SyncStatus } from './HomeSections';
 import { SpendingChart } from './SpendingChart';
 
 export { Delta, type PeriodData } from './DashboardHero';
@@ -35,6 +35,7 @@ export function Home({ data }: { data: PeriodData }) {
       <SpendingChart byCategory={s.byCategory} valid={data.valid} />
       <InsightList items={insights} />
       <ReviewSummary />
+      <RulesUpdateNotice />
       <SyncStatus />
     </>
   );

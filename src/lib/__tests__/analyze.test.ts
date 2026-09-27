@@ -186,9 +186,10 @@ describe('credit-card payments', () => {
     expect(summarize(a.all, cats).spent).toBe(0);
   });
 
-  it('asks for review when no card spending was ever recorded', () => {
+  it('a clear bill payment never needs attention, even with no card spending recorded', () => {
     const a = run(parseSms([sms('Rs 15,000 debited from A/c XX1234 towards credit card bill payment', { id: 'cc' })]));
-    expect(a.review.map((r) => r.flag.kind)).toContain('card_payment');
+    expect(a.review).toHaveLength(0);
+    expect(a.stats.cardPayments).toBe(1);
   });
 
   it('no review needed when card spends were recorded', () => {

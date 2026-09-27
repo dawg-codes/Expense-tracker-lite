@@ -21,6 +21,7 @@ export function learnedRule(v: Pick<TxnView, 'merchant' | 'merchantRaw' | 'direc
   if (change.category) return { id: newRuleId(), match, category: change.category, learned: true };
   if (change.type === 'transfer') return { id: newRuleId(), match, type: 'transfer', direction: v.direction, learned: true };
   if (change.type === 'refund' && v.direction === 'credit') return { id: newRuleId(), match, type: 'refund', direction: 'credit', learned: true };
+  if (change.type === 'card_payment') return { id: newRuleId(), match, type: 'card_payment', direction: v.direction, learned: true };
   if (change.type === 'income' && v.direction === 'credit') return { id: newRuleId(), match, type: 'income', direction: 'credit', learned: true };
   return undefined;
 }
@@ -60,6 +61,8 @@ export interface SyncSummary {
   cardPayments: number;
   attention: number;
   ids: string[];
+  /** Older transactions that the latest rules re-classified as card bill payments. */
+  reclassified?: number;
 }
 
 /** What happened to the transactions added by a sync. */

@@ -1,7 +1,15 @@
 import type { Direction, ParseTag, RawSms, Txn, TxnType } from './types';
+import { detectCardBill } from './cardPayments';
 import { normalizeMerchant } from './merchants';
 
 export type { RawSms, Txn } from './types';
+
+/**
+ * Bump when detection rules change in a way that should re-check transactions
+ * already stored. The app re-reads the inbox once (see App.tsx) to apply them.
+ *   2: robust credit-card bill payment detection
+ */
+export const PARSER_VERSION = 2;
 
 const MAX_AMOUNT = 1_000_000;
 const MIN = 60_000;
@@ -32,7 +40,7 @@ const RULES: Array<[string, RegExp]> = [
 const SKIP =
   /\botp\b|one[- ]time password|will be (?:debited|credited)|is due|min(?:imum)? (?:amount )?due|has been requested|collect request|\b(?:declined|failed|unsuccessful)\b/;
 const STRONG_DEBIT = /\b(?:debited|spent|withdrawn)\b|thank you for using/;
-const DEBIT = /\b(?:debited|spent|paid|sent|withdrawn|purchase|dr)\b|\btransferred\b(?! to your)|thank you for using/;
+const DEBIT = /\b(?:debited|spent|paid|sent|withdrawn|purchase|dr)\b|\btransferred\b(?! to your)|thank you for using|\bpayment of (?:rs\.?|inr|₹) ?[\d,]+(?:\.\d+)? (?:made |done )?to\b/;
 const CREDIT = /\b(?:credited|received|deposited|refund(?:ed)?|reversed|cr)\b/;
 const STRONG_CREDIT = /\b(?:credited|deposited)\b/;
 const WEAK_ONLY = /\b(?:dr|cr)\b/;
@@ -60,15 +68,7 @@ const TAG_RULES: Array<[ParseTag, RegExp]> = [
 const COUNTER_TO = /\bto\s+(?:your\s+)?(?:a\/?c|acct|account)(?:\s*no\.?)?\s*[:\-]?\s*(?:[x*.]+\s*)?(\d{3,6})\b/i;
 const COUNTER_FROM = /\bfrom\s+(?:your\s+)?(?:a\/?c|acct|account)(?:\s*no\.?)?\s*[:\-]?\s*(?:[x*.]+\s*)?(\d{3,6})\b/i;
 
-/** Paying a credit-card bill (either the bank-account side or the card side). */
-const CC_BILL = new RegExp(
-  [
-    String.raw`\b(?:payment|paid|pmt)\b(?:[^.;]|\.\d){0,40}\b(?:towards|received (?:on|for|towards|in)|to your|for your)\b(?:[^.;]|\.\d){0,30}\bcredit ?card\b`,
-    String.raw`\bcredit ?card\b(?:[^.;]|\.\d){0,30}\b(?:bill|dues)\b`,
-    String.raw`\bcc ?(?:bill|payment)\b`,
-    String.raw`\bcard ?(?:bill|dues)\b`,
-  ].join('|'),
-);
+/* credit-card bill payments: see cardPayments.ts */
 
 const BANK_SENDER =
   /HDFC|ICICI|SBI|AXIS|KOTAK|YESB|IDFC|INDUS|PNB|BOB|BARODA|CANBNK|CANARA|UNION|FEDBNK|FEDERAL|RBL|AUBANK|IDBI|BOI|CENTBK|IOB|UCO|PAYTM|AMEX|CITI|HSBC|SCB|DBS|ONECARD|SLICE|JUPITER/;
@@ -183,11 +183,21 @@ export function parseOne(sms: RawSms): Txn | null {
 
   const di = body.search(DEBIT);
   const ci = body.search(CREDIT);
-  // "Thank you for payment of Rs X towards your credit card": the card side of a bill payment
-  const cardSide = di < 0 && ci < 0 && CC_BILL.test(body);
+  const sender = sms.sender || sms.address || 'Bank';
+  const cardBill = detectCardBill(raw, sender);
+  // Bill payments often have no debited/credited verb ("Payment of Rs X made … to your credit card")
+  const cardSide = di < 0 && ci < 0 && cardBill?.level === 'certain';
   const undirected = di < 0 && ci < 0 && !cardSide;
   if (undirected && !UNDIRECTED.test(body)) return null;
-  const direction: Direction = cardSide ? 'credit' : di >= 0 && (ci < 0 || di < ci) ? 'debit' : undirected ? 'debit' : 'credit';
+  const direction: Direction = cardSide
+    ? cardBill!.side === 'account'
+      ? 'debit'
+      : 'credit'
+    : di >= 0 && (ci < 0 || di < ci)
+      ? 'debit'
+      : undirected
+        ? 'debit'
+        : 'credit';
 
   const stripped = raw.replace(BALANCE, ' ');
   let match = stripped.match(AMOUNT);
@@ -198,8 +208,8 @@ export function parseOne(sms: RawSms): Txn | null {
   if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_AMOUNT) return null;
 
   const tags = TAG_RULES.filter(([, re]) => re.test(body)).map(([t]) => t);
-  const isSpend = /\bspent\b|thank you for using/.test(body);
-  if (!isSpend && CC_BILL.test(body)) tags.push('cc_bill');
+  if (cardBill?.level === 'certain') tags.push('cc_bill');
+  else if (cardBill?.level === 'possible') tags.push('cc_maybe');
   const strong = direction === 'debit' ? STRONG_DEBIT.test(body) : STRONG_CREDIT.test(body);
   const onlyWeak =
     !undirected &&
@@ -218,7 +228,8 @@ export function parseOne(sms: RawSms): Txn | null {
   else if (tags.includes('self')) type = 'transfer';
   else type = direction === 'debit' ? 'expense' : 'income';
 
-  const payee = cardSide || tags.includes('cc_bill') ? {} : undirected ? cardPurchase : extractPayee(stripped, direction);
+  // a bill payment's only "payee" is the card (or an app like CRED on the account side)
+  const payee = cardSide || (tags.includes('cc_bill') && direction === 'credit') ? {} : undirected ? cardPurchase : extractPayee(stripped, direction);
   const merchant = normalizeMerchant(payee.raw, type === 'income' ? undefined : body);
 
   let category: string;
@@ -232,7 +243,6 @@ export function parseOne(sms: RawSms): Txn | null {
   const counter = (direction === 'debit' ? body.match(COUNTER_TO) : body.match(COUNTER_FROM))?.[1];
   const counterAccount = counter && counter.slice(-4) !== accountDigits?.slice(-4) ? `XX${counter.slice(-4)}` : undefined;
   const ref = body.match(REF)?.[1];
-  const sender = sms.sender || sms.address || 'Bank';
 
   /* confidence: how sure are we this is a real transaction… */
   let parseScore = 0.3;

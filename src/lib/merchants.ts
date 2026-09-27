@@ -95,6 +95,8 @@ export const KNOWN_MERCHANTS: KnownMerchant[] = [
   m('PharmEasy', /\bpharm ?easy/, 'Health'),
   m('Tata 1mg', /\b1mg\b/, 'Health'),
   m('Netmeds', /\bnetmeds/, 'Health'),
+  // card bill payments
+  m('CRED', /\bcred(?:\.club|\s+club)?\b/, 'Finance'),
   // investing
   m('Zerodha', /\bzerodha/, 'Finance'),
   m('Groww', /\bgroww/, 'Finance'),

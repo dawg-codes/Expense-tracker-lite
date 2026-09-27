@@ -628,3 +628,16 @@ button:disabled { cursor: default; opacity: 0.45; }
 }
 .empty-body { font-size: 14px; line-height: 1.5; }
 .review-card .btn-small.ghost { background: var(--surface); border: 1px solid var(--line); }
+
+/* radio option list (sort sheet) */
+.option-list { display: flex; flex-direction: column; }
+.option {
+  display: flex; align-items: center; gap: 14px;
+  min-height: 50px; padding: 0 4px; border: 0; border-bottom: 1px solid var(--line);
+  background: none; font-size: 15px; text-align: left; color: var(--text);
+}
+.option:last-child { border-bottom: 0; }
+.option .radio { width: 20px; height: 20px; flex: none; border-radius: 50%; border: 2px solid var(--line-strong); display: grid; place-items: center; }
+.option.active { color: var(--accent); font-weight: 600; }
+.option.active .radio { border-color: var(--accent); }
+.option.active .radio::after { content: ''; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }

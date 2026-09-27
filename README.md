@@ -37,11 +37,12 @@ Expense Tracker Lite reads the banking alerts already sitting in your phone's in
 | 🏷️ **Merchant normalisation** | `SWIGGY`, `Swiggy Instamart`, `SWIGGY*ONLINE` and `swiggy@icici` all become **Swiggy**. About 80 common Indian merchants, utilities and insurers are covered by a one-line-per-merchant rule table |
 | ↔️ **Own-account transfers** | A debit on one account and a matching credit on another within minutes is shown as an internal transfer, not spending. Looser matches go to Review instead |
 | ↩️ **Refunds** | Refunds are linked to the original purchase and netted out of spending. Same-amount credits from a merchant are suggested as *possible* refunds |
-| 💳 **Card bill payments** | Paying your credit-card bill isn't counted as spending (the card purchases are). If no card spending was ever recorded, Review asks you |
+| 💳 **Card bill payments** | Paying your credit-card bill isn't counted as spending (the card purchases are). Detected from either side (your bank debiting the account, or the card issuer confirming receipt), across common Indian wordings: "towards Credit Card XX1234", "card outstanding/dues", "CC payment", "BBPS", "CARDMEMBER, payment received", CRED, SBI Card/AMEX/OneCard/BOBCARD. Card *purchases* ("spent using…", "via RuPay credit card") are never excluded. Only money sent to a bare card number without bill wording is asked about |
 | 🤖 **Auto-resolution** | Everything that can be determined confidently is handled for you: duplicate alerts, own-account transfers, refunds, card bill payments, known merchants and payee names ("… STORES" → Groceries, a person's name → People). After each sync you see what was handled |
 | 🧐 **Review, only when needed** | Only genuinely ambiguous transactions are asked about, grouped by reason and by payee so one tap resolves many ("ABC STORES · 14 transactions · ₹8,420 → Categorise all"). Confirm / Change / Ignore / Exclude, with **Undo** |
 | 🧠 **Learns from you** | Correcting a category, or marking a transfer or refund, creates a local rule for that payee, so past and future payments follow automatically |
-| 🔎 **Search & filters** | Search by merchant, amount (`840`), bank or reference. Filter by type, category, sender, amount range and dates |
+| 🔎 **Search, filters & sort** | Search by merchant, amount (`840`), bank or reference. Filter by type, category, sender, amount range and dates. Sort by date, amount or merchant, and it combines with any filter |
+| ↩️ **Android back** | Back closes the open sheet or editor first, then returns to the previous screen with its filters, sort and scroll position. It only leaves the app from Home |
 | 🧾 **Transaction details** | Type, category, merchant, "as written" payee, sender, masked account, reference, confidence and status, all editable |
 | 📌 **Merchant rules** | "*ABC STORES* → Groceries" or "*MY SAVINGS* → Transfer". Whole-word matching; your rules beat learned ones, which beat automatic detection. Manage them in *More → Merchant rules* |
 | 🗂️ **Categories** | 18 built-in (incl. Groceries, Insurance, Subscriptions, Education, People) plus your own custom categories |
@@ -77,7 +78,7 @@ Every transaction ends up in one of three tiers:
 
 On a realistic 8-month test inbox (617 transactions), Review went from 286 items to 35, which take 7 decisions, and every automatic decision matched the ground truth (`auto-resolve.test.ts`).
 
-Detection runs on stored fields, so improvements apply to past transactions too. New fields such as the counter-account are filled in the next time you sync.
+Detection runs on stored fields, so improvements apply to past transactions too. When the SMS rules themselves improve (`PARSER_VERSION` in `parser.ts`), the app re-reads your inbox **once** on the next launch, only if SMS permission is already granted. It keeps every decision you made and reports what changed ("12 older card bill payments excluded"). If it can't, Home shows a one-tap *Sync* prompt.
 
 ## 🗄️ Data model & migration
 
@@ -87,7 +88,7 @@ Transactions are stored under `et:txns:v3` as `{ schema: 3, txns: Txn[] }` (see 
 
 - **React 19** + **TypeScript** (strict)
 - **Vite** for builds, **Vitest** for tests
-- **Capacitor 8** for the Android shell, SMS access (`capacitor-sms-reader`) and file sharing (`@capacitor/filesystem`, `@capacitor/share`)
+- **Capacitor 8** for the Android shell, SMS access (`capacitor-sms-reader`), file sharing (`@capacitor/filesystem`, `@capacitor/share`) and the Android back button (`@capacitor/app`)
 - **Motion** for animations
 - Plain CSS with design tokens (hierarchy through type and spacing; glass only on the dock) and safe-area support
 
@@ -114,6 +115,8 @@ src/
 ├── components/           # Home, Activity, Insights, Review, More, transaction detail, UI kit
 └── lib/
     ├── parser.ts         # SMS → transaction, duplicate detection
+    ├── cardPayments.ts   # credit-card bill payment rules (signals, purchase guards, issuers)
+    ├── activity.ts       # Activity filter + sort pipeline
     ├── merchants.ts      # merchant normalisation rules
     ├── analyze.ts        # rules, transfers, refunds, card payments, review queue
     ├── recurring.ts      # recurring payment detection
@@ -126,7 +129,7 @@ src/
 
 ## 🧪 Testing
 
-`npm test` runs 130+ tests covering: automatic resolution on a realistic 600-transaction inbox (nothing high-confidence reaches Review, every auto-decision matches ground truth), learning & bulk rules, expenses and income, balance/OTP/failed-transaction exclusion, duplicate detection, merchant normalisation, transfer, refund and credit-card-payment detection, category rules, ambiguous messages, custom merchant rules, recurring detection, calendar boundaries (Sep 1 / Sep 30 / Oct 1), v2 → v3 migration, CSV escaping and backup validation. `regression.test.ts` pins the original v2 parser behaviour.
+`npm test` runs 190+ tests covering: 22 credit-card bill-payment formats vs 11 card purchases, Activity sort + filter, automatic resolution on a realistic 600-transaction inbox (nothing high-confidence reaches Review, every auto-decision matches ground truth), learning & bulk rules, expenses and income, balance/OTP/failed-transaction exclusion, duplicate detection, merchant normalisation, transfer, refund and credit-card-payment detection, category rules, ambiguous messages, custom merchant rules, recurring detection, calendar boundaries (Sep 1 / Sep 30 / Oct 1), v2 → v3 migration, CSV escaping and backup validation. `regression.test.ts` pins the original v2 parser behaviour.
 
 ## ⚠️ Good to know
 
