@@ -1,5 +1,7 @@
 import { memo, useState } from 'react';
 import { catMeta, type CategoryMap } from '../lib/categories';
+import { ruleNeedle } from '../lib/analyze';
+import { learnByDefault, newRuleId } from '../lib/learning';
 import { inr } from '../lib/parser';
 import type { TxnType, TxnView } from '../lib/types';
 import { dismissFlag, mergeUser, useApp } from './context';
@@ -14,11 +16,11 @@ export const KIND_META: Record<TxnType, { label: string; emoji: string }> = {
   unknown: { label: 'Unclear', emoji: '❓' },
 };
 
-export function confidenceLabel(c: number): { label: string; tone: 'pos' | 'warn' | 'muted' } {
-  if (c >= 0.8) return { label: 'High', tone: 'pos' };
-  if (c >= 0.6) return { label: 'Medium', tone: 'muted' };
-  return { label: 'Needs review', tone: 'warn' };
-}
+export const TIER_LABEL: Record<TxnView['tier'], { label: string; tone: 'pos' | 'warn' | 'muted' }> = {
+  high: { label: 'High', tone: 'pos' },
+  medium: { label: 'Medium · resolved automatically', tone: 'muted' },
+  review: { label: 'Needs your decision', tone: 'warn' },
+};
 
 export function displayName(v: TxnView, cats: CategoryMap): string {
   if (v.name) return v.name;
@@ -26,6 +28,8 @@ export function displayName(v: TxnView, cats: CategoryMap): string {
   if (v.kind === 'transfer') return 'Transfer';
   if (v.kind === 'card_payment') return 'Card bill payment';
   if (v.kind === 'refund') return 'Refund';
+  if (v.kind === 'unknown') return 'Unclear transaction';
+  if (v.dupOf) return 'Duplicate alert';
   return catMeta(cats, v.cat).label;
 }
 
@@ -101,15 +105,18 @@ export function CategoryPicker({ value, onPick }: { value?: string; onPick: (id:
 
 /** Contents of the transaction detail sheet. */
 export function TxnDetail({ id, onClose }: { id: string; onClose: () => void }) {
-  const { analysis, cats, decide, saveRule, openTxn, maskIncome } = useApp();
+  const { analysis, cats, decide, learn, saveRule, openTxn, maskIncome } = useApp();
   const v = analysis.byId.get(id);
   const [picking, setPicking] = useState(false);
+  const [applyAll, setApplyAll] = useState(() => (v ? learnByDefault(v) : true));
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(v?.name ?? '');
 
   if (!v) return <p className="muted center pad">This transaction no longer exists.</p>;
   const meta = catMeta(cats, v.cat);
-  const conf = confidenceLabel(v.confidence);
+  const tier = TIER_LABEL[v.tier];
+  const needle = ruleNeedle(v);
+  const samePayee = needle && !v.ruleId ? analysis.all.filter((x) => x.id !== v.id && ruleNeedle(x) === needle).length : 0;
   const linked = v.linkedId ? analysis.byId.get(v.linkedId) : undefined;
   const dupOf = v.dupOf ? analysis.byId.get(v.dupOf) : undefined;
   const title = displayName(v, cats);
@@ -189,8 +196,14 @@ export function TxnDetail({ id, onClose }: { id: string; onClose: () => void }) 
         )}
         <div>
           <dt>Confidence</dt>
-          <dd className={conf.tone}>{v.user?.reviewed || v.user?.category ? 'Confirmed by you' : conf.label}</dd>
+          <dd className={tier.tone}>{v.user ? 'Confirmed by you' : tier.label}</dd>
         </div>
+        {v.autoNote && !v.user && (
+          <div>
+            <dt>Why</dt>
+            <dd>{v.autoNote}</dd>
+          </div>
+        )}
         <div>
           <dt>Status</dt>
           <dd>{status}</dd>
@@ -223,8 +236,7 @@ export function TxnDetail({ id, onClose }: { id: string; onClose: () => void }) 
             aria-checked={v.kind === k}
             className={`pill ${v.kind === k ? 'active' : ''}`}
             onClick={() =>
-              k !== v.kind &&
-              decide([v.id], (p) => mergeUser(p, { type: k, reviewed: true }), `Marked as ${KIND_META[k].label.toLowerCase()}`)
+              k !== v.kind && learn([v.id], v, { type: k }, applyAll, `Marked as ${KIND_META[k].label.toLowerCase()}`)
             }
           >
             {KIND_META[k].emoji} {KIND_META[k].label}
@@ -241,10 +253,16 @@ export function TxnDetail({ id, onClose }: { id: string; onClose: () => void }) 
           <CategoryPicker
             value={v.cat}
             onPick={(c) => {
-              decide([v.id], (p) => mergeUser(p, { category: c, reviewed: true }), `Category set to ${catMeta(cats, c).label}`);
+              learn([v.id], v, { category: c }, applyAll, `Category set to ${catMeta(cats, c).label}`);
               setPicking(false);
             }}
           />
+        )}
+        {needle && !v.ruleId && (
+          <label className="check">
+            <input type="checkbox" checked={applyAll} onChange={(e) => setApplyAll(e.target.checked)} />
+            Remember for “{needle}”{samePayee > 0 ? ` (and apply to ${samePayee} other payment${samePayee === 1 ? '' : 's'})` : ''}
+          </label>
         )}
 
         <button
@@ -274,13 +292,12 @@ export function TxnDetail({ id, onClose }: { id: string; onClose: () => void }) 
           </form>
         )}
 
-        {(v.merchantRaw || v.merchant) && !v.ruleId && (
+        {needle && !v.ruleId && v.kind === 'expense' && (
           <button
             className="action"
             onClick={() => {
               // normalised name catches every spelling ("SWIGGY*ONLINE", "Swiggy Instamart"…)
-              const match = v.merchant ?? ((v.merchantRaw ?? '').replace(/[*@].*$/, '').trim() || v.name);
-              saveRule({ id: `r_${Date.now().toString(36)}`, match, category: v.cat, rename: v.user?.merchant });
+              saveRule({ id: newRuleId(), match: needle, category: v.cat, rename: v.user?.merchant });
             }}
           >
             <span>📌 Always use {meta.label} for “{v.name}”</span>

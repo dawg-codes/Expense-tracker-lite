@@ -1,10 +1,11 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { CUSTOM_COLORS, catMeta, newCategoryId } from '../lib/categories';
 import { parseBackup, type BackupFile } from '../lib/exporter';
 import { inr } from '../lib/parser';
-import type { Budgets, CategoryDef, MerchantRule } from '../lib/types';
+import { newRuleId } from '../lib/learning';
+import type { Budgets, CategoryDef, MerchantRule, TxnType } from '../lib/types';
 import { useApp } from './context';
-import { CategoryPicker } from './txn';
+import { CategoryPicker, KIND_META } from './txn';
 import { Icon, Sheet, Toggle } from './ui';
 
 export type MoreSheet = null | 'budgets' | 'categories' | 'rules';
@@ -185,36 +186,72 @@ function CategoryEditor() {
 
 /* ---------- merchant rules ---------- */
 
+const RULE_TYPES: Array<[TxnType | undefined, string]> = [
+  [undefined, '🏷️ Just categorise'],
+  ['transfer', '↔️ Transfer'],
+  ['refund', '↩️ Refund'],
+  ['income', '⬇️ Income'],
+];
+
+function describeRule(r: MerchantRule, cats: ReturnType<typeof useApp>['cats']): string {
+  const parts: string[] = [];
+  if (r.type) parts.push(KIND_META[r.type].label);
+  if (r.category) parts.push(`${catMeta(cats, r.category).emoji} ${catMeta(cats, r.category).label}`);
+  return parts.join(' · ');
+}
+
 function RuleEditor() {
   const { rules, saveRule, deleteRule, cats, analysis } = useApp();
   const [edit, setEdit] = useState<MerchantRule | null>(null);
-  const hits = (r: MerchantRule) => analysis.all.filter((v) => v.ruleId === r.id).length;
+  const [showLearned, setShowLearned] = useState(true);
+  const hits = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const v of analysis.all) if (v.ruleId) m.set(v.ruleId, (m.get(v.ruleId) ?? 0) + 1);
+    return m;
+  }, [analysis]);
+  const manual = rules.filter((r) => !r.learned);
+  const learned = rules.filter((r) => r.learned);
 
   if (edit) {
+    const valid = !!edit.match.trim() && (!!edit.category || !!edit.type);
     return (
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (!edit.match.trim()) return;
-          saveRule({ ...edit, match: edit.match.trim(), rename: edit.rename?.trim() || undefined, id: edit.id || `r_${Date.now().toString(36)}` });
+          if (!valid) return;
+          const direction = edit.type === 'refund' || edit.type === 'income' ? 'credit' : edit.type === 'transfer' ? edit.direction : undefined;
+          // editing a learned rule makes it yours
+          saveRule({ ...edit, match: edit.match.trim(), rename: edit.rename?.trim() || undefined, direction, learned: undefined, id: edit.id || newRuleId() });
           setEdit(null);
         }}
       >
         <label className="field">
-          <span className="label">If merchant contains</span>
-          <input value={edit.match} autoFocus maxLength={60} placeholder="e.g. MURUGAN STORES" onChange={(e) => setEdit({ ...edit, match: e.target.value })} />
+          <span className="label">If merchant / payee contains</span>
+          <input value={edit.match} autoFocus maxLength={60} placeholder="e.g. ABC STORES" onChange={(e) => setEdit({ ...edit, match: e.target.value })} />
         </label>
+        <p className="label">Treat as</p>
+        <div className="chip-row wrap">
+          {RULE_TYPES.map(([t, label]) => (
+            <button type="button" key={label} className={`pill ${edit.type === t ? 'active' : ''}`} onClick={() => setEdit({ ...edit, type: t, category: t && t !== 'refund' ? undefined : edit.category })}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {(!edit.type || edit.type === 'refund') && (
+          <>
+            <p className="label">Category{edit.type ? ' (optional)' : ''}</p>
+            <CategoryPicker value={edit.category} onPick={(category) => setEdit({ ...edit, category: edit.category === category && edit.type ? undefined : category })} />
+          </>
+        )}
         <label className="field">
           <span className="label">Show it as (optional)</span>
-          <input value={edit.rename ?? ''} maxLength={60} placeholder="e.g. Murugan Stores" onChange={(e) => setEdit({ ...edit, rename: e.target.value })} />
+          <input value={edit.rename ?? ''} maxLength={60} placeholder="e.g. ABC Stores" onChange={(e) => setEdit({ ...edit, rename: e.target.value })} />
         </label>
-        <p className="label">Category</p>
-        <CategoryPicker value={edit.category} onPick={(category) => setEdit({ ...edit, category })} />
         <div className="sheet-actions">
           <button type="button" className="btn-small ghost" onClick={() => setEdit(null)}>
             Cancel
           </button>
-          <button type="submit" className="btn-primary" disabled={!edit.match.trim()}>
+          <button type="submit" className="btn-primary" disabled={!valid}>
             Save rule
           </button>
         </div>
@@ -222,33 +259,43 @@ function RuleEditor() {
     );
   }
 
+  const row = (r: MerchantRule) => (
+    <li key={r.id}>
+      <span className="grow">
+        <strong>“{r.match}”</strong> → {describeRule(r, cats)}
+        {r.rename && <small className="muted"> as {r.rename}</small>}
+        <small className="muted block">
+          {r.learned ? 'Learned · ' : ''}
+          {hits.get(r.id) ?? 0} transaction(s)
+        </small>
+      </span>
+      <button className="icon-btn small" onClick={() => setEdit(r)} aria-label="Edit rule">
+        <Icon name="edit" size={14} />
+      </button>
+      <button className="icon-btn small danger" onClick={() => deleteRule(r.id)} aria-label="Delete rule">
+        <Icon name="trash" size={14} />
+      </button>
+    </li>
+  );
+
   return (
     <>
       <p className="muted small">
-        Rules beat automatic categorisation and apply to past and future transactions. Matching is case-insensitive. Your manual per-transaction
-        choices still win.
+        Rules beat automatic detection and apply to past and future transactions (whole-word, case-insensitive). A choice you make on a single
+        transaction still wins. Rules are stored only on this device.
       </p>
-      {rules.length === 0 && <p className="muted small">No rules yet. You can also create one from any transaction.</p>}
-      <ul className="rule-list">
-        {rules.map((r) => {
-          const meta = catMeta(cats, r.category);
-          return (
-            <li key={r.id}>
-              <span className="grow">
-                <strong>“{r.match}”</strong> → {meta.emoji} {meta.label}
-                {r.rename && <small className="muted"> as {r.rename}</small>}
-                <small className="muted block">{hits(r)} transaction(s)</small>
-              </span>
-              <button className="icon-btn small" onClick={() => setEdit(r)} aria-label="Edit rule">
-                <Icon name="edit" size={14} />
-              </button>
-              <button className="icon-btn small danger" onClick={() => deleteRule(r.id)} aria-label="Delete rule">
-                <Icon name="trash" size={14} />
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+      <p className="label">Your rules</p>
+      {manual.length === 0 && <p className="muted small">None yet. Create one below or from any transaction.</p>}
+      <ul className="rule-list">{manual.map(row)}</ul>
+      {learned.length > 0 && (
+        <>
+          <button className="dupe-head" onClick={() => setShowLearned(!showLearned)} aria-expanded={showLearned}>
+            <span className="label">Learned from your corrections · {learned.length}</span>
+            <span className="link">{showLearned ? 'Hide' : 'Show'}</span>
+          </button>
+          {showLearned && <ul className="rule-list">{learned.map(row)}</ul>}
+        </>
+      )}
       <button className="btn-primary" onClick={() => setEdit({ id: '', match: '', category: 'Groceries' })}>
         <Icon name="plus" /> New rule
       </button>

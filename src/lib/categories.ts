@@ -17,6 +17,7 @@ export const BUILTIN_CATEGORIES: CategoryDef[] = [
   { id: 'Health', label: 'Health', emoji: '🏥', color: '#ef4444' },
   { id: 'Education', label: 'Education', emoji: '🎓', color: '#eab308', nature: 'committed' },
   { id: 'Family', label: 'Family', emoji: '👨‍👩‍👧', color: '#f97316' },
+  { id: 'People', label: 'People', emoji: '🧑‍🤝‍🧑', color: '#fb7185' },
   { id: 'Travel', label: 'Travel', emoji: '✈️', color: '#6366f1', nature: 'discretionary' },
   { id: 'Entertainment', label: 'Entertainment', emoji: '🎬', color: '#a855f7', nature: 'discretionary' },
   { id: 'Finance', label: 'Finance', emoji: '💰', color: '#14b8a6' },

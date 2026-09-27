@@ -11,6 +11,8 @@ const KINDS: Array<[string, string]> = [
   ['income', 'Income'],
   ['transfer', 'Transfers'],
   ['refund', 'Refunds'],
+  ['card_payment', 'Card bills'],
+  ['duplicate', 'Duplicates'],
 ];
 const PAGE = 60;
 
@@ -52,8 +54,13 @@ export function Activity({
 
   const results = useMemo(() => {
     const src = filter.allTime ? all : base;
+    const only = filter.ids ? new Set(filter.ids) : null;
     return src.filter((v) => {
-      if (filter.kinds.length && !filter.kinds.includes(v.kind)) return false;
+      if (only && !only.has(v.id)) return false;
+      // duplicate alerts are hidden unless asked for
+      const showDupes = filter.kinds.includes('duplicate');
+      if (v.dupOf && !showDupes) return false;
+      if (filter.kinds.length && !filter.kinds.includes(v.dupOf ? 'duplicate' : v.kind)) return false;
       if (filter.category && v.cat !== filter.category) return false;
       if (filter.sender && v.sender !== filter.sender) return false;
       if (filter.min !== undefined && v.amount < filter.min) return false;
@@ -73,6 +80,7 @@ export function Activity({
   if (filter.min !== undefined) chips.push([`≥ ${inr(filter.min)}`, () => setFilter({ ...filter, min: undefined })]);
   if (filter.max !== undefined) chips.push([`≤ ${inr(filter.max)}`, () => setFilter({ ...filter, max: undefined })]);
   if (filter.allTime) chips.push(['All time', () => setFilter({ ...filter, allTime: false })]);
+  if (filter.ids) chips.push([filter.idsLabel ?? 'Selected', () => setFilter({ ...filter, ids: undefined, idsLabel: undefined })]);
   const filtered = chips.length > 0 || filter.kinds.length > 0 || !!query;
 
   const toggleKind = (k: string) =>

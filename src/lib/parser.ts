@@ -21,7 +21,7 @@ const RULES: Array<[string, RegExp]> = [
   ['Health', /pharmacy|medical|doctor|hospital|apollo|health|clinic|diagnostic/],
   ['Education', /school|college|tuition|university|\bcourse\b/],
   ['Family', /kids|parents|family/],
-  ['Travel', /flight|hotel|\btrain\b|irctc|makemytrip|travel|airline/],
+  ['Travel', /flight|\btrain\b|irctc|makemytrip|travel|airline|oyo rooms|hotel booking/],
   ['Entertainment', /movie|pvr|bookmyshow|cinema/],
   ['Finance', /mutual fund|\bsip\b|zerodha|groww|investment|\bstock\b|\btax\b/],
 ];
@@ -53,7 +53,12 @@ const TAG_RULES: Array<[ParseTag, RegExp]> = [
   ['cc', /\bcredit ?card\b|\bcc\b/],
   ['emi', /\bemi\b|\bloan\b|instal(?:l)?ment/],
   ['autopay', /\bmandate\b|\bauto ?pay\b|standing instruction|\be-?nach\b|\bnach\b/],
+  ['rail', /\b(?:imps|neft|rtgs)\b/],
 ];
+
+/** The other account in "IMPS to A/c XX9876" / "transfer from A/c XX1234". */
+const COUNTER_TO = /\bto\s+(?:your\s+)?(?:a\/?c|acct|account)(?:\s*no\.?)?\s*[:\-]?\s*(?:[x*.]+\s*)?(\d{3,6})\b/i;
+const COUNTER_FROM = /\bfrom\s+(?:your\s+)?(?:a\/?c|acct|account)(?:\s*no\.?)?\s*[:\-]?\s*(?:[x*.]+\s*)?(\d{3,6})\b/i;
 
 /** Paying a credit-card bill (either the bank-account side or the card side). */
 const CC_BILL = new RegExp(
@@ -85,7 +90,7 @@ const CREDIT_PAYER = [
   new RegExp(String.raw`\b(?:from|by)\s+(?:vpa\s+)?${FRAG}${END}`, 'gi'),
   new RegExp(String.raw`\binfo[:\s-]+([^.;\n]{2,50})`, 'gi'),
 ];
-const NOT_PAYEE = /^(?:your|ur|the|a\/?c|ac|acct|account|card|mobile|beneficiary|self|neft|imps|rtgs|upi)\b|[x*]{2,}\d/i;
+const NOT_PAYEE = /^(?:your|ur|the|a\/?c|ac|acct|account|card|mobile|beneficiary|self|neft|imps|rtgs|upi|rs\.?|inr)\b|^₹|[x*]{2,}\d/i;
 
 /** Picks the most name-like segment of "UPI/P2M/612345678901/SWIGGY". */
 function pickSegment(frag: string): string {
@@ -102,8 +107,11 @@ function extractPayee(text: string, direction: Direction): { raw?: string } {
   for (const re of patterns) {
     re.lastIndex = 0;
     for (const m of text.matchAll(re)) {
-      const frag = pickSegment(m[1].trim());
+      let frag = pickSegment(m[1].trim());
       if (NOT_PAYEE.test(frag)) continue;
+      // phone-number VPA: keep only the last 4 digits
+      const phone = frag.match(/^\+?\d{6,}(\d{4})@([a-z]+)$/i);
+      if (phone) frag = `••${phone[1]}@${phone[2]}`;
       const n = normalizeMerchant(frag);
       if (n.name) return { raw: frag.slice(0, 40) };
     }
@@ -138,6 +146,13 @@ export function normSender(s: string): string {
     .replace(/^[A-Z0-9]{2}-/, '')
     .replace(/-[A-Z]$/, '')
     .replace(/[^A-Z0-9]/g, '');
+}
+
+const APP_SENDER = /PAYTM|PHONPE|PHONEPE|GPAY|GOOGLEPAY|AMAZONPAY|AMZPAY|BHIM|MOBIKWIK|FREECHARGE|CRED|NAVIUP|SUPERMONEY/;
+
+/** UPI / wallet apps that echo payments your bank also reports. */
+export function isAppSender(s: string): boolean {
+  return APP_SENDER.test(normSender(s));
 }
 
 export function isBankSender(s: string): boolean {
@@ -193,14 +208,17 @@ export function parseOne(sms: RawSms): Txn | null {
     WEAK_ONLY.test(body);
   if (onlyWeak) tags.push('weak');
 
+  // "Txn of Rs 700 on your card XX12 at AMAZON": a card purchase in practice
+  const cardPurchase: { raw?: string } = undirected && tags.includes('card') ? extractPayee(stripped, 'debit') : {};
+
   let type: TxnType;
-  if (undirected) type = 'unknown';
+  if (undirected && !cardPurchase.raw) type = 'unknown';
   else if (tags.includes('cc_bill')) type = 'card_payment';
   else if (direction === 'credit' && tags.includes('refund')) type = 'refund';
   else if (tags.includes('self')) type = 'transfer';
   else type = direction === 'debit' ? 'expense' : 'income';
 
-  const payee = cardSide ? {} : extractPayee(stripped, direction);
+  const payee = cardSide || tags.includes('cc_bill') ? {} : undirected ? cardPurchase : extractPayee(stripped, direction);
   const merchant = normalizeMerchant(payee.raw, type === 'income' ? undefined : body);
 
   let category: string;
@@ -211,6 +229,8 @@ export function parseOne(sms: RawSms): Txn | null {
 
   const acct = body.match(ACCOUNT);
   const accountDigits = acct ? (acct[1] ?? acct[2]) : undefined;
+  const counter = (direction === 'debit' ? body.match(COUNTER_TO) : body.match(COUNTER_FROM))?.[1];
+  const counterAccount = counter && counter.slice(-4) !== accountDigits?.slice(-4) ? `XX${counter.slice(-4)}` : undefined;
   const ref = body.match(REF)?.[1];
   const sender = sms.sender || sms.address || 'Bank';
 
@@ -218,6 +238,7 @@ export function parseOne(sms: RawSms): Txn | null {
   let parseScore = 0.3;
   if (strong) parseScore += 0.35;
   else if (!onlyWeak && !undirected) parseScore += cardSide ? 0.2 : 0.25;
+  else if (cardPurchase.raw) parseScore += 0.15;
   else if (onlyWeak) parseScore += 0.1;
   if (currency) parseScore += 0.15;
   if (accountDigits) parseScore += 0.1;
@@ -248,6 +269,7 @@ export function parseOne(sms: RawSms): Txn | null {
     merchantRaw: payee.raw,
     sender,
     account: accountDigits ? `XX${accountDigits.slice(-4)}` : undefined,
+    counterAccount,
     ref,
     fp: hash(body.replace(/[^a-z0-9]/g, '')),
     confidence: Math.round(clamp01(Math.min(parseScore, catScore)) * 100) / 100,
@@ -304,9 +326,14 @@ export function dedupe(all: Txn[], forceKeep?: Set<string>): { unique: Txn[]; du
           }
           if (normSender(t.sender) !== normSender(k.sender) && !paired.has(k.id)) {
             kept = k;
-            reason = 'Same amount from two senders (bank + app alert)';
-            certain = false;
             paired.add(k.id);
+            // A bank alert + a UPI-app alert, or two alerts naming the same account or
+            // merchant, are the same payment. Two different banks might not be.
+            const appPair = isAppSender(t.sender) !== isAppSender(k.sender);
+            const sameAccount = !!t.account && t.account === k.account;
+            const sameMerchant = !!t.merchant && t.merchant === k.merchant;
+            certain = appPair || sameAccount || sameMerchant;
+            reason = certain ? 'Same payment reported by your bank and a payment app' : 'Same amount from two senders a few minutes apart';
             break;
           }
         }

@@ -2,7 +2,8 @@ import { createContext, useContext } from 'react';
 import type { Analysis } from '../lib/analyze';
 import type { CategoryMap } from '../lib/categories';
 import type { Period } from '../lib/dates';
-import type { Budgets, CategoryDef, MerchantRule, TxnOverrides } from '../lib/types';
+import type { SyncSummary } from '../lib/learning';
+import type { Budgets, CategoryDef, MerchantRule, TxnOverrides, TxnType, TxnView } from '../lib/types';
 
 export type Tab = 'home' | 'activity' | 'insights' | 'review' | 'more';
 
@@ -14,6 +15,9 @@ export interface ActivityFilter {
   min?: number;
   max?: number;
   allTime: boolean;
+  /** Restrict to these transactions (e.g. "from the last sync"). */
+  ids?: string[];
+  idsLabel?: string;
 }
 
 export const EMPTY_FILTER: ActivityFilter = { query: '', kinds: [], allTime: false };
@@ -49,7 +53,11 @@ export interface AppCtx {
   openTxn: (id: string) => void;
   toast: (message: string, type?: 'error' | 'success' | 'info', action?: ToastAction) => void;
   /** Applies a change to transactions' user overrides, with an Undo toast. */
-  decide: (ids: string[], patch: OverridePatch, label: string) => void;
+  decide: (ids: string[], patch: OverridePatch, label: string, nextRules?: MerchantRule[]) => void;
+  /** Correct transactions and (optionally) learn a rule for the payee. */
+  learn: (ids: string[], sample: TxnView, change: { category?: string; type?: TxnType }, applyToAll: boolean, label: string) => void;
+  syncSummary: SyncSummary | null;
+  dismissSyncSummary: () => void;
   undo: (decisionId: number) => void;
   saveRule: (rule: MerchantRule) => void;
   deleteRule: (id: string) => void;

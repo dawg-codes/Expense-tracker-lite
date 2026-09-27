@@ -28,7 +28,7 @@ export const KEYS = {
 } as const;
 
 const TYPES: TxnType[] = ['expense', 'income', 'transfer', 'refund', 'card_payment', 'unknown'];
-const TAGS: ParseTag[] = ['self', 'refund', 'card', 'cc', 'cc_bill', 'emi', 'autopay', 'weak'];
+const TAGS: ParseTag[] = ['self', 'refund', 'card', 'cc', 'cc_bill', 'emi', 'autopay', 'rail', 'weak'];
 const FLAGS: FlagKind[] = ['duplicate', 'transfer', 'refund', 'uncategorised', 'unknown_type', 'low_confidence', 'card_payment'];
 
 type Obj = Record<string, unknown>;
@@ -97,6 +97,8 @@ export function sanitizeTxn(v: unknown): Txn | null {
   if (merchantRaw) t.merchantRaw = merchantRaw;
   const account = str(v.account, 12);
   if (account && /^[X*]{0,4}\d{3,6}$/i.test(account)) t.account = account;
+  const counterAccount = str(v.counterAccount, 12);
+  if (counterAccount && /^[X*]{0,4}\d{3,6}$/i.test(counterAccount)) t.counterAccount = counterAccount;
   const ref = str(v.ref, 20);
   if (ref && /^\d{6,20}$/.test(ref)) t.ref = ref;
   if (Array.isArray(v.tags)) {
@@ -136,10 +138,16 @@ export function sanitizeRules(v: unknown): MerchantRule[] {
     const id = str(r.id, 60);
     const match = str(r.match, 60);
     const category = str(r.category, 60);
-    if (!id || !match || !category) return [];
-    const rule: MerchantRule = { id, match, category };
+    const type = oneOf(r.type, TYPES);
+    if (!id || !match || (!category && !type)) return [];
+    const rule: MerchantRule = { id, match };
+    if (category) rule.category = category;
+    if (type) rule.type = type;
+    const direction = oneOf(r.direction, ['debit', 'credit'] as const);
+    if (direction) rule.direction = direction;
     const rename = str(r.rename, 60);
     if (rename) rule.rename = rename;
+    if (r.learned === true) rule.learned = true;
     return [rule];
   });
 }
