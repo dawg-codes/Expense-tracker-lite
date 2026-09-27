@@ -1,7 +1,7 @@
 import { memo, useMemo } from 'react';
 import { motion } from 'motion/react';
 import { catMeta } from '../lib/categories';
-import { periodHint, periodRange } from '../lib/dates';
+import { periodHint, periodRange, periodTitle } from '../lib/dates';
 import { categoryChanges, monthlySeries, type MonthPoint } from '../lib/insights';
 import { inr } from '../lib/parser';
 import type { TxnView } from '../lib/types';
@@ -52,8 +52,9 @@ const TrendChart = memo(function TrendChart({
   );
 });
 
-export function Insights({ data, all }: { data: PeriodData; all: TxnView[] }) {
-  const { period, setPeriod, cats, analysis, maskIncome, reduce, dismissRecurring, go, openTxn } = useApp();
+export function Insights({ data, all, onEditBudgets }: { data: PeriodData; all: TxnView[]; onEditBudgets: () => void }) {
+  const { period, setPeriod, cats, analysis, budgets, maskIncome, reduce, dismissRecurring, go, openTxn } = useApp();
+  const hasBudgets = !!budgets.total || Object.keys(budgets.categories).length > 0;
   const s = data.summary;
   const range = periodRange(period);
   const anchor = range ? Math.min(range.end, Date.now()) : Date.now();
@@ -100,6 +101,67 @@ export function Insights({ data, all }: { data: PeriodData; all: TxnView[] }) {
         )}
       </motion.section>
 
+      {/* budgets (monthly) */}
+      {hasBudgets ? (
+        <section className="card">
+          <div className="row-between">
+            <h2 className="section-title">Budget · {period.mode === 'month' ? periodTitle(period) : 'monthly'}</h2>
+            <button className="link" onClick={onEditBudgets}>
+              Edit
+            </button>
+          </div>
+          {period.mode !== 'month' ? (
+            <p className="muted small">Budgets are monthly. Switch to Month to see progress.</p>
+          ) : (
+            <>
+              {budgets.total ? (
+                <div className="budget-line big">
+                  <div className="row-between">
+                    <span>
+                      <strong>{inr(s.spent)}</strong> <span className="muted">/ {inr(budgets.total)}</span>
+                    </span>
+                    <span className={s.spent > budgets.total ? 'neg' : 'muted'}>
+                      {s.spent > budgets.total ? `${inr(s.spent - budgets.total)} over` : `${inr(budgets.total - s.spent)} left`}
+                    </span>
+                  </div>
+                  <Bar pct={(s.spent / budgets.total) * 100} color="var(--accent)" reduce={reduce} over={s.spent > budgets.total} />
+                </div>
+              ) : null}
+              <ul className="cats">
+                {Object.entries(budgets.categories).map(([cat, limit]) => {
+                  const spent = s.byCategory.find(([c]) => c === cat)?.[1] ?? 0;
+                  const meta = catMeta(cats, cat);
+                  return (
+                    <li key={cat}>
+                      <div className="row-between">
+                        <span>
+                          {meta.emoji} {meta.label}
+                        </span>
+                        <span className="cat-amt">
+                          {inr(spent)} <em>/ {inr(limit)}</em>
+                        </span>
+                      </div>
+                      <Bar pct={(spent / limit) * 100} color={meta.color} reduce={reduce} over={spent > limit} />
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
+          )}
+        </section>
+      ) : (
+        <button className="row-link" onClick={onEditBudgets}>
+          <span className="insight-mark" aria-hidden="true">
+            <Icon name="plus" size={13} />
+          </span>
+          <span className="grow">
+            <strong>Set a monthly budget</strong>
+            <small>Optional. Track spending against a total or per category.</small>
+          </span>
+          <Icon name="right" size={18} className="chev" />
+        </button>
+      )}
+
       {/* comparison */}
       {data.compare && (
         <section className="card">
@@ -113,28 +175,31 @@ export function Insights({ data, all }: { data: PeriodData; all: TxnView[] }) {
               <span className="label">{data.compare.label}</span>
               <strong>{inr(data.compare.spent)}</strong>
             </div>
-            <div>
-              <span className="label">Difference</span>
-              <Delta now={s.spent} before={data.compare.spent} />
-            </div>
           </div>
+          <p className="compare-delta">
+            <Delta now={s.spent} before={data.compare.spent} />
+          </p>
           {changes.length > 0 && (
-            <ul className="changes">
-              {changes.map((c) => {
-                const meta = catMeta(cats, c.cat);
-                return (
-                  <li key={c.cat} className="row-between">
-                    <span>
-                      {meta.emoji} {meta.label}
-                    </span>
-                    <span className="small">
-                      <span className="muted">{inr(c.before)} → </span>
-                      {inr(c.now)} <Delta now={c.now} before={c.before} />
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
+            <>
+              <p className="label changes-title">Biggest changes by category</p>
+              <ul className="changes">
+                {changes.map((c) => {
+                  const meta = catMeta(cats, c.cat);
+                  return (
+                    <li key={c.cat}>
+                      <span className="change-name">
+                        <span aria-hidden="true">{meta.emoji}</span> {meta.label}
+                        <small className="muted">was {inr(c.before)}</small>
+                      </span>
+                      <span className="change-now">
+                        <strong>{inr(c.now)}</strong>
+                        <Delta now={c.now} before={c.before} />
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
           )}
         </section>
       )}

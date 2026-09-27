@@ -128,6 +128,13 @@ export function periodHint(p: Period): string {
   return `${-p.offset} ${u}s ago`;
 }
 
+/** Phrase for use inside a sentence: "today", "this month", "last week", "in this period". */
+export function periodScope(p: Period): string {
+  if (p.mode === 'all') return 'overall';
+  if (p.mode === 'custom' || p.offset < -1 || p.offset > 0) return 'in this period';
+  return periodHint(p).toLowerCase();
+}
+
 /** Maps the v2 persisted filter ('weekly' | 'monthly' | 'yearly' | 'custom') to a period mode. */
 export function migrateFilter(v: unknown): PeriodMode {
   if (v === 'weekly') return 'week';

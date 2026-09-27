@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { migrateFilter, periodHint, periodRange, periodTitle } from '../dates';
+import { migrateFilter, periodHint, periodRange, periodScope, periodTitle } from '../dates';
+import { headlineInsights, type Summary } from '../insights';
 
 const at = (y: number, m: number, d: number, h = 12, min = 0) => new Date(y, m - 1, d, h, min).getTime();
 const NOW = at(2026, 9, 27);
@@ -32,6 +33,12 @@ describe('calendar month', () => {
     const r = periodRange({ mode: 'month', offset: -9 }, NOW);
     expect(periodTitle({ mode: 'month', offset: -9 }, NOW)).toBe('December 2025');
     expect(within(at(2025, 12, 31), r)).toBe(true);
+  });
+
+  it('phrases the period for sentences', () => {
+    expect(periodScope({ mode: 'day', offset: 0 })).toBe('today');
+    expect(periodScope({ mode: 'month', offset: -1 })).toBe('last month');
+    expect(periodScope({ mode: 'month', offset: -3 })).toBe('in this period');
   });
 
   it('titles the period for the UI', () => {
@@ -79,5 +86,36 @@ describe('other periods', () => {
     expect(migrateFilter('yearly')).toBe('year');
     expect(migrateFilter('custom')).toBe('custom');
     expect(migrateFilter(undefined)).toBe('month');
+  });
+});
+
+
+describe('headline insights', () => {
+  const base: Summary = {
+    spent: 573, gross: 573, refunds: 0, income: 0, transfers: 0, count: 4,
+    byCategory: [['Food', 390], ['Transport', 183]],
+    committed: 0, discretionary: 573, unclassified: 0,
+    topMerchants: [{ name: 'Swiggy', amount: 390, count: 2 }],
+  };
+  const label = (id: string) => id;
+
+  it('leads with the change vs the previous period, then the top category', () => {
+    const h = headlineInsights(base, { scope: 'today', compare: { label: 'yesterday', spent: 325 }, categoryLabel: label });
+    expect(h.map((x) => x.text)).toEqual(['You spent ₹248 more than yesterday.', 'Food made up 68% of spending today.']);
+  });
+
+  it('shows at most two and skips tiny changes', () => {
+    const h = headlineInsights(base, { scope: 'today', compare: { label: 'yesterday', spent: 570 }, recurringMonthly: 45099, categoryLabel: label });
+    expect(h).toHaveLength(2);
+    expect(h[0].text).toMatch(/^Food made up/);
+  });
+
+  it('warns first when spending exceeded income', () => {
+    const h = headlineInsights({ ...base, income: 100 }, { scope: 'this month', categoryLabel: label });
+    expect(h[0].text).toBe('You spent more than you received this month.');
+  });
+
+  it('returns nothing for an empty period', () => {
+    expect(headlineInsights({ ...base, spent: 0, gross: 0, byCategory: [], topMerchants: [] }, { scope: 'today', categoryLabel: label })).toEqual([]);
   });
 });

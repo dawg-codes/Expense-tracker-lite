@@ -72,6 +72,7 @@ const ICONS = {
   shield: <path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z" />,
   undo: <path d="M9 14L4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3" />,
   repeat: <path d="M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3" />,
+  spark: <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" />,
 };
 
 export type IconName = keyof typeof ICONS;
@@ -157,6 +158,7 @@ export function Sheet({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
         >
           <motion.div
             className="sheet"
@@ -167,7 +169,7 @@ export function Sheet({
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
-            transition={{ type: 'spring', stiffness: 420, damping: 40 }}
+            transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
           >
             <div className="sheet-head">
               <span className="sheet-grip" aria-hidden="true" />
@@ -189,7 +191,7 @@ export function Empty({ emoji, title, children }: { emoji: string; title: string
     <motion.div className="card empty" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
       <div className="empty-emoji">{emoji}</div>
       <h2>{title}</h2>
-      {children && <p className="muted">{children}</p>}
+      {children && <div className="muted empty-body">{children}</div>}
     </motion.div>
   );
 }

@@ -52,7 +52,7 @@ Expense Tracker Lite reads the banking alerts already sitting in your phone's in
 | 📤 **CSV export** | Date, time, amount, direction, type, merchant, category, sender, account, reference. Delivered through Android's share sheet |
 | 💾 **Backup & restore** | Versioned JSON backup (transactions, categories, rules, budgets, settings). Imports are validated before anything changes, then you choose **Merge** or **Replace** (with undo) |
 | 🎞️ **Motion** | Springy transitions, animated totals, drawing charts. Fully respects *reduce motion* |
-| 🌗 **Themes** | Dark and light, glass surfaces, safe-area aware |
+| 🌗 **Design** | A calm dashboard: spend and "where it went" first, details in bottom sheets, a floating dock, dark and light themes, safe-area aware |
 
 ## 🧠 How the parsing works
 
@@ -89,7 +89,7 @@ Transactions are stored under `et:txns:v3` as `{ schema: 3, txns: Txn[] }` (see 
 - **Vite** for builds, **Vitest** for tests
 - **Capacitor 8** for the Android shell, SMS access (`capacitor-sms-reader`) and file sharing (`@capacitor/filesystem`, `@capacitor/share`)
 - **Motion** for animations
-- Plain CSS with design tokens, glass surfaces and safe-area support
+- Plain CSS with design tokens (hierarchy through type and spacing; glass only on the dock) and safe-area support
 
 ## 📱 Getting started
 

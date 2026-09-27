@@ -258,44 +258,54 @@ export function Review() {
 
   return (
     <>
-      <section className="card hero">
-        <span className="label">🧐 Review</span>
-        <h2 className="review-count">
-          {items.length === 0 ? 'Nothing needs you' : `${items.length} transaction${items.length === 1 ? '' : 's'} need${items.length === 1 ? 's' : ''} your attention`}
-        </h2>
-        {items.length > 0 && decisionsNeeded < items.length && (
-          <p className="small">
-            <b>
-              {decisionsNeeded} decision{decisionsNeeded === 1 ? '' : 's'}
-            </b>{' '}
-            will clear them all.
-          </p>
-        )}
-        <p className="muted small">
-          ✓ {st.resolved.toLocaleString('en-IN')} handled automatically. Only genuinely ambiguous cases land here, and your choices teach the app for next time.
+      <section className="review-head" aria-live="polite">
+        <p className="review-count">
+          {items.length === 0 ? (
+            'Nothing needs you'
+          ) : (
+            <>
+              <span className="review-num">{items.length}</span> transaction{items.length === 1 ? '' : 's'} need{items.length === 1 ? 's' : ''} your
+              attention
+            </>
+          )}
         </p>
-        <div className="chip-row wrap auto-chips">
+        <p className="muted small">
+          {items.length > 0 && decisionsNeeded < items.length && (
+            <>
+              <b className="text">
+                {decisionsNeeded} decision{decisionsNeeded === 1 ? '' : 's'}
+              </b>{' '}
+              will clear them all ·{' '}
+            </>
+          )}
+          {st.resolved.toLocaleString('en-IN')} handled automatically
+        </p>
+        <div className="chip-row auto-chips">
           {st.categorised > 0 && (
-            <button className="pill" onClick={() => go('activity', { allTime: true, kinds: ['expense'] })}>
-              🏷️ {st.categorised} categorised
+            <button className="pill small-pill" onClick={() => go('activity', { allTime: true, kinds: ['expense'] })}>
+              {st.categorised} categorised
             </button>
           )}
           {st.duplicates > 0 && (
-            <button className="pill" onClick={() => setShowDupes(true)}>
-              🔁 {st.duplicates} duplicates
+            <button className="pill small-pill" onClick={() => setShowDupes(true)}>
+              {st.duplicates} duplicates
             </button>
           )}
           {st.transfers > 0 && (
-            <button className="pill" onClick={() => go('activity', { allTime: true, kinds: ['transfer'] })}>
-              ↔️ {st.transfers} transfers
+            <button className="pill small-pill" onClick={() => go('activity', { allTime: true, kinds: ['transfer'] })}>
+              {st.transfers} transfers
             </button>
           )}
           {st.refunds > 0 && (
-            <button className="pill" onClick={() => go('activity', { allTime: true, kinds: ['refund'] })}>
-              ↩️ {st.refunds} refunds
+            <button className="pill small-pill" onClick={() => go('activity', { allTime: true, kinds: ['refund'] })}>
+              {st.refunds} refunds
             </button>
           )}
-          {st.cardPayments > 0 && <span className="pill static">💳 {st.cardPayments} card bills</span>}
+          {st.cardPayments > 0 && (
+            <button className="pill small-pill" onClick={() => go('activity', { allTime: true, kinds: ['card_payment'] })}>
+              {st.cardPayments} card bills
+            </button>
+          )}
         </div>
       </section>
 
