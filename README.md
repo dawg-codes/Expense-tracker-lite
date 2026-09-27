@@ -13,89 +13,113 @@ Private. Offline. Zero cloud. Zero tracking.
 
 ## ✨ What is it?
 
-Expense Tracker Lite reads the banking alerts already sitting in your phone's inbox and turns them into a clean, animated breakdown of where your money went. No bank logins, no account linking, no sign-up, and nothing ever leaves your device.
+Expense Tracker Lite reads the banking alerts already sitting in your phone's inbox and turns them into a clear picture of where your money went. No bank logins, no account linking, no sign-up, and nothing ever leaves your device.
 
-Tap **Sync**, and in seconds you see:
-
-- 💰 how much you spent, and how much came in
-- 🍩 a category-by-category donut and bar breakdown
-- 🧾 a feed of your latest transactions
-- 💡 a quick insight on your biggest spending area
+> A private, offline expense tracker that turns bank SMS into useful spending insights.
 
 ## 🔒 Privacy first
 
-- **On-device only.** All parsing and storage happen on your phone.
-- **No servers, no analytics, no accounts.**
-- **Only the essentials are stored:** amount, category, date and sender. The full SMS text is never saved.
-- **Income masking.** Hide your income with one tap.
-- **Clear everything** in one tap (with undo).
+| | |
+|---|---|
+| 📱 **On-device only** | SMS is parsed in memory on your phone. There is no backend and no analytics. |
+| 🧾 **No message text stored** | Only structured fields are kept: amount, date, direction/type, merchant, category, sender ID, masked account (e.g. `XX1234`), reference number. Every write goes through a field whitelist (`sanitizeTxn`), so SMS text can't be persisted even by accident. |
+| 🚫 **Outside connections blocked** | Production builds ship a Content-Security-Policy (`default-src 'self'`) that blocks requests to any other site. |
+| ☁️ **No cloud backup** | The CI build sets `android:allowBackup="false"` so Android doesn't copy your data to Google Drive. |
+| 🔐 **Privacy center** | Shows live counts (transactions stored, SMS stored = 0, whether outside connections are blocked, storage used), plus one-tap *Clear all data* with undo. |
+| 🙈 **Income masking** | Hide income amounts with one toggle. |
 
 ## 🚀 Features
 
 | | |
 |---|---|
-| 📩 **Smart SMS parsing** | Detects debits and credits, ignores OTPs and balance lines |
-| 🔁 **Duplicate detection** | Catches the same payment reported by your bank and a UPI app, and shows you exactly what it ignored |
-| 🏷️ **Auto-categorising** | Food, Home, EMI, Transport, Shopping, Bills, Health, Family, Travel, Entertainment, Finance and more |
-| 📅 **Flexible ranges** | Weekly, monthly, yearly or a custom date range |
-| 🎞️ **Fluid animations** | Springy transitions, animated totals, drawing charts, respects reduced-motion settings |
-| 🌗 **Dark and light themes** | Remembers your choice |
-| ⚠️ **Helpful errors** | Clear messages for denied permissions and failures, with retry |
-| ↩️ **Undo** | Cleared your data by mistake? One tap brings it back |
+| 📅 **Calendar periods** | Day, week (Mon–Sun), **calendar month** (1st → last day), year, all time or a custom range, with ‹ › navigation ("September 2026 · Last month") |
+| 💰 **Income dashboard** | Income, spent (net of refunds) and net for any period, compared with the same point last period |
+| 🏷️ **Merchant normalisation** | `SWIGGY`, `Swiggy Instamart`, `SWIGGY*ONLINE` and `swiggy@icici` all become **Swiggy**. About 80 common Indian merchants, utilities and insurers are covered by a one-line-per-merchant rule table |
+| ↔️ **Own-account transfers** | A debit on one account and a matching credit on another within minutes is shown as an internal transfer, not spending. Looser matches go to Review instead |
+| ↩️ **Refunds** | Refunds are linked to the original purchase and netted out of spending. Same-amount credits from a merchant are suggested as *possible* refunds |
+| 💳 **Card bill payments** | Paying your credit-card bill isn't counted as spending (the card purchases are). If no card spending was ever recorded, Review asks you |
+| 🧐 **Review center** | Possible duplicates, transfers, refunds, unknown merchants and unclear messages, each with one-tap Confirm / Reject / Change category / Mark transfer / Mark refund / Exclude, plus **Undo** |
+| 🔎 **Search & filters** | Search by merchant, amount (`840`), bank or reference. Filter by type, category, sender, amount range and dates |
+| 🧾 **Transaction details** | Type, category, merchant, "as written" payee, sender, masked account, reference, confidence and status, all editable |
+| 📌 **Custom merchant rules** | "If merchant contains *MURUGAN STORES* → Groceries". Rules beat automatic categorisation and apply to history too. Create them from a transaction, from Review or in *More* |
+| 🗂️ **Categories** | 17 built-in (incl. Groceries, Insurance, Subscriptions, Education) plus your own custom categories |
+| 🔄 **Recurring payments** | Conservative detection of EMIs, insurance, subscriptions and rent (same merchant, similar amount, regular interval), with an estimated monthly commitment. Dismiss anything that's wrong |
+| 🎯 **Budgets** | Optional monthly total and per-category budgets with progress bars |
+| 📈 **Trends** | 6-month spent vs income chart, category changes vs last period, top merchants |
+| ⚖️ **Committed vs discretionary** | EMI, insurance, bills, subscriptions and recurring payments vs day-to-day spending. Low-confidence items stay *Not sure* |
+| 📤 **CSV export** | Date, time, amount, direction, type, merchant, category, sender, account, reference. Delivered through Android's share sheet |
+| 💾 **Backup & restore** | Versioned JSON backup (transactions, categories, rules, budgets, settings). Imports are validated before anything changes, then you choose **Merge** or **Replace** (with undo) |
+| 🎞️ **Motion** | Springy transitions, animated totals, drawing charts. Fully respects *reduce motion* |
+| 🌗 **Themes** | Dark and light, glass surfaces, safe-area aware |
+
+## 🧠 How the parsing works
+
+1. **Skip** OTPs, reminders ("will be debited", "min amount due"), collect requests and failed/declined transactions.
+2. **Direction** comes from whole-word debit/credit wording. Balance and limit mentions are stripped so they're never taken as the amount.
+3. **Amount** is read from ₹ / Rs / INR, or an SBI-style `debited by 500.00`.
+4. **Merchant, account and reference** are extracted, and the merchant is normalised.
+5. **Type**: expense, income, transfer (self-transfer wording), refund, card payment, or *unknown* when there's no clear direction.
+6. **Category**, highest priority first: your manual choice → your merchant rules → known merchant → keyword → Other.
+7. **Confidence** (0 → 1) combines "is this really a transaction?" with "do we know what it was for?". It's a heuristic, not a probability. The app only shows it as *High / Medium / Needs review*.
+8. **Analysis pass** (derived, never stored, so fixes apply to history): duplicate detection, transfer pairing, refund linking, card-payment checks, review flags and recurring detection.
+
+When unsure, the app **doesn't guess**: totals stay unchanged and the item goes to Review.
+
+## 🗄️ Data model & migration
+
+Transactions are stored under `et:txns:v3` as `{ schema: 3, txns: Txn[] }` (see `src/lib/types.ts`). Your edits live in a separate `user` overrides object, so re-syncing never loses them. Data from v2 (`et:txns:v2`) is migrated automatically on first launch: debits become expenses, credits become income, nothing is dropped. The old key is removed only after the new data is written successfully.
 
 ## 🛠️ Tech stack
 
-- **React 19** + **TypeScript**
-- **Vite** for lightning-fast builds
-- **Capacitor 8** for the Android shell and native SMS access
+- **React 19** + **TypeScript** (strict)
+- **Vite** for builds, **Vitest** for tests
+- **Capacitor 8** for the Android shell, SMS access (`capacitor-sms-reader`) and file sharing (`@capacitor/filesystem`, `@capacitor/share`)
 - **Motion** for animations
 - Plain CSS with design tokens, glass surfaces and safe-area support
 
 ## 📱 Getting started
 
 ```bash
-# 1. Install dependencies
 npm install
-
-# 2. Run in the browser (UI only, SMS needs a real Android device)
-npm run dev
-
-# 3. Build the web bundle and sync it into the Android project
-npm run build
+npm test            # parser, analysis, dates, storage & export tests
+npm run dev         # UI in the browser (SMS needs a real Android device)
+npm run build       # typecheck + production build
 npx cap sync android
-
-# 4. Open in Android Studio and run on your phone
 npx cap open android
 ```
 
 **Requirements:** Node 22+, JDK 21, Android Studio (current).
 
-> Note: Reading SMS is only possible inside the Android app. In a browser the app will tell you so instead of failing silently.
+> If you generate the Android project yourself, set `android:allowBackup="false"` in `AndroidManifest.xml` (CI does this for you).
 
 ## 🗂️ Project structure
 
 ```
 src/
-├── App.tsx          # UI, state, sync flow
-├── lib/parser.ts    # SMS parsing, categorising, duplicate detection
-├── main.tsx         # Entry point
-└── styles.css       # Theme and components
+├── App.tsx               # state, persistence, sync, tabs
+├── components/           # Home, Activity, Insights, Review, More, transaction detail, UI kit
+└── lib/
+    ├── parser.ts         # SMS → transaction, duplicate detection
+    ├── merchants.ts      # merchant normalisation rules
+    ├── analyze.ts        # rules, transfers, refunds, card payments, review queue
+    ├── recurring.ts      # recurring payment detection
+    ├── insights.ts       # totals, trends, committed vs discretionary
+    ├── dates.ts          # calendar periods
+    ├── storage.ts        # schema, migration, sanitising
+    ├── exporter.ts       # CSV, backup/restore, file sharing
+    └── __tests__/        # Vitest suites
 ```
 
-## 🧠 How the parsing works
+## 🧪 Testing
 
-1. Each SMS is checked for debit or credit wording, using whole-word matches only.
-2. Balance and limit mentions are stripped so they aren't mistaken for the amount.
-3. The amount is extracted (₹ / Rs / INR) and the message is categorised by merchant keywords.
-4. Duplicates are removed using reference numbers, identical messages, and same-amount alerts from different senders within a short window.
-
-Parsing is heuristic, so bank formats vary. Use the **Review** card to see what was treated as a duplicate.
+`npm test` runs 100+ tests covering: expenses and income, balance/OTP/failed-transaction exclusion, duplicate detection, merchant normalisation, transfer, refund and credit-card-payment detection, category rules, ambiguous messages, custom merchant rules, recurring detection, calendar boundaries (Sep 1 / Sep 30 / Oct 1), v2 → v3 migration, CSV escaping and backup validation. `regression.test.ts` pins the original v2 parser behaviour.
 
 ## ⚠️ Good to know
 
 - Android only (SMS access isn't available on iOS).
-- Totals are estimates based on message wording. Transfers between your own accounts and credit card bill payments may need manual judgement.
-- "Monthly" means the last 30 days.
+- Totals are based only on the SMS you receive. They are estimates, not a full view of your finances.
+- Bank formats vary. If something looks wrong, fix it in Review or with a rule.
+- No notifications: budgets are shown in-app only.
 
 ## 🍴 Fork it, make it yours
 
@@ -112,7 +136,7 @@ This is an open-source project, and forks are welcome. To make your own version:
    npx cap add android
    npx cap sync android
    ```
-4. **Tweak the brain:** categories and keywords live in `src/lib/parser.ts`. Add merchants, banks or categories that fit where you live.
+4. **Tweak the brain:** merchants live in `src/lib/merchants.ts` (one line each), keyword categories and bank wording in `src/lib/parser.ts`, and categories in `src/lib/categories.ts`.
 5. **Restyle it:** colors and spacing are design tokens at the top of `src/styles.css`.
 
 ### 🌍 Using it outside India?
@@ -133,11 +157,14 @@ Contributions of all sizes are welcome: bug reports, new bank formats, category 
 
 ## 🗺️ Roadmap
 
-- [ ] Exclude own-account transfers and card bill payments
-- [ ] Custom categories and merchant rules
-- [ ] Monthly budgets with alerts
-- [ ] CSV export
-- [ ] Calendar-month view
+- [x] Calendar-month view
+- [x] Exclude own-account transfers and card bill payments
+- [x] Custom categories and merchant rules
+- [x] Monthly budgets
+- [x] CSV export and local backup/restore
+- [ ] Optional local budget alerts
+- [ ] Manual (cash) transactions
+- [ ] Split a transaction across categories
 
 ## 👨‍💻 Author
 
