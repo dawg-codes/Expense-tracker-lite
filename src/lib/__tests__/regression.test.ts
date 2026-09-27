@@ -102,7 +102,8 @@ describe('v2 dedupe regression', () => {
       ]),
     );
     expect(unique).toHaveLength(1);
-    expect(dupes[0].reason).toMatch(/two senders/);
+    // v3.1: a bank + payment-app pair is now a certain duplicate (was sent to Review)
+    expect(dupes[0].certain).toBe(true);
   });
 
   it('keeps two genuine same-amount payments from the same sender', () => {

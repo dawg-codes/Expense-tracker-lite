@@ -22,6 +22,7 @@ export type ParseTag =
   | 'cc_bill' // payment towards a credit-card bill
   | 'emi' // EMI / loan instalment wording
   | 'autopay' // mandate / standing instruction
+  | 'rail' // IMPS / NEFT / RTGS wording
   | 'weak'; // only abbreviated/weak debit/credit words
 
 /** Choices the user made. Always wins over automatic detection. */
@@ -59,6 +60,8 @@ export interface Txn {
   sender: string;
   /** Masked account/card tail as printed in the alert, e.g. "XX1234". */
   account?: string;
+  /** The other account named in the alert ("IMPS to A/c XX9876"), masked. */
+  counterAccount?: string;
   /** UPI / NEFT / IMPS reference number. */
   ref?: string;
   /** One-way hash of the normalised message, used only for duplicate detection. */
@@ -93,6 +96,14 @@ export interface TxnView extends Txn {
   recurringKey?: string;
   /** Matched a user merchant rule. */
   ruleId?: string;
+  /** The category came from that rule. */
+  catByRule?: boolean;
+  /** Category guessed from the payee name (e.g. "… STORES" → Groceries, a person's name → People). */
+  inferred?: boolean;
+  /** Short explanation of what was resolved automatically, e.g. "Own-account transfer to XX9876". */
+  autoNote?: string;
+  /** high = certain, medium = resolved by heuristics, review = needs the user. */
+  tier: 'high' | 'medium' | 'review';
   flags: Flag[];
   /** Counts towards totals. */
   counted: boolean;
@@ -110,11 +121,18 @@ export interface CategoryDef {
 
 export interface MerchantRule {
   id: string;
-  /** Case-insensitive "contains" match against the merchant/payee. */
+  /** Case-insensitive whole-word match against the merchant/payee. */
   match: string;
-  category: string;
+  /** Category to apply. Optional when the rule only sets a type. */
+  category?: string;
+  /** Classify matching transactions as this type (e.g. transfer, refund). */
+  type?: TxnType;
+  /** Only apply to money going out / coming in. */
+  direction?: Direction;
   /** Optional display name, e.g. "Murugan Stores". */
   rename?: string;
+  /** Created automatically from one of your corrections. */
+  learned?: boolean;
 }
 
 export interface Budgets {

@@ -35,10 +35,34 @@ describe('direction and type', () => {
     expect(t?.direction).toBe('credit');
   });
 
-  it('ambiguous: transaction with no direction becomes unknown with low confidence', () => {
-    const t = one('Txn of Rs 700.00 on your card XX1234 at XYZ on 26-09-26');
+  it('ambiguous: transaction with no direction and no merchant becomes unknown', () => {
+    const t = one('Txn of Rs 700.00 on your card XX1234 on 26-09-26');
     expect(t?.type).toBe('unknown');
     expect(t!.confidence).toBeLessThan(0.5);
+  });
+
+  it('"Txn of Rs X on your card at MERCHANT" is a card purchase', () => {
+    const t = one('Txn of Rs 700.00 on your card XX1234 at XYZ TRADERS on 26-09-26');
+    expect(t).toMatchObject({ type: 'expense', direction: 'debit', merchant: 'Xyz Traders' });
+  });
+
+  it('never takes "Rs" as the payee name', () => {
+    const t = one('Your A/C XXXXX9876 has been credited by Rs.25000.00 on 03-09-26 by IMPS transfer from A/c XX1234');
+    expect(t?.merchant).toBeUndefined();
+    expect(t).toMatchObject({ account: 'XX9876', counterAccount: 'XX1234' });
+  });
+
+  it('captures the other account in IMPS/NEFT transfers', () => {
+    const t = one('Rs.20000 debited from A/c XX1234 on 10-09-26. IMPS to A/c XX9876 Ref 612345678905');
+    expect(t).toMatchObject({ account: 'XX1234', counterAccount: 'XX9876' });
+    expect(t?.tags).toContain('rail');
+  });
+
+  it('masks phone-number VPAs', () => {
+    const t = one('Rs.60.00 debited from a/c **1234 to VPA 9876543210@ybl (UPI Ref No 612345678904)');
+    expect(t?.merchantRaw).toBe('••3210@ybl');
+    expect(t?.merchant).toBe('UPI ••3210');
+    expect(JSON.stringify(t)).not.toContain('9876543210');
   });
 
   it('both debit and credit words lower the confidence', () => {

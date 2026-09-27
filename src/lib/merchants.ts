@@ -134,6 +134,8 @@ export function cleanMerchant(raw: string | undefined): string | undefined {
   let s = raw.trim();
   if (/^(?:your|ur)\b/i.test(s)) return undefined;
 
+  // phone-number VPA ("••3210@ybl" after masking): a person
+  if (/^[•*x]+\d{2,4}@/i.test(s)) return `UPI ••${s.match(/(\d{2,4})@/)![1]}`;
   // VPA like "swiggy@icici" or "john.doe-1@okaxis": keep the handle
   const vpa = s.match(/^([a-z0-9._-]+)@[a-z]+$/i);
   if (vpa) {
@@ -184,4 +186,60 @@ export function merchantKey(name: string | undefined): string | undefined {
   if (!name) return undefined;
   const k = name.toLowerCase().replace(/[^a-z0-9]/g, '');
   return k.length >= 2 ? k : undefined;
+}
+
+/* ---------- name-based inference ---------- */
+
+export const KNOWN_NAMES = new Set(KNOWN_MERCHANTS.map((k) => k.name));
+
+/** Business words in payee names → category. Checked on the payee name only, never the SMS. */
+const NAME_HINTS: Array<[string, RegExp]> = [
+  ['Groceries', /\b(?:stores?|kirana|provisions?|super ?market|mart|grocer(?:y|ies)|general store|departmental|vegetables?|fruits?|dairy|milk)\b/],
+  ['Food', /\b(?:hotel|restaurants?|cafe|caf[eé]|bakery|bakers|sweets?|biryani|dhaba|mess|canteen|tea|coffee|juice|foods?|kitchen|pizza|chicken)\b/],
+  ['Health', /\b(?:medicals?|pharma(?:cy)?|chemists?|clinic|hospitals?|diagnostics?|labs?|dental|health ?care)\b/],
+  ['Transport', /\b(?:fuels?|petroleum|petrol|filling station|service station|auto|parking|travels)\b/],
+  ['Home', /\b(?:hardware|electricals|furnitures?|interiors?|plumbing|paints?|rent)\b/],
+  ['Shopping', /\b(?:textiles?|garments|fashions?|footwear|silks?|jewell?ers?|mobiles?|electronics|boutique)\b/],
+  ['Education', /\b(?:school|college|academy|tuitions?|institute|coaching)\b/],
+];
+
+const GLUED_HINTS: Array<[string, RegExp]> = [
+  ['Groceries', /(?:stores?|kirana|mart|provisions?|supermarket)$/],
+  ['Food', /(?:hotel|restaurant|cafe|bakery|sweets|biryani|foods)$/],
+  ['Health', /(?:medicals?|pharmacy|chemists?|clinic|hospital)$/],
+];
+
+/** Words that make a name look like a business rather than a person. */
+const BUSINESS = /\b(?:enterprises?|traders?|trading|agenc(?:y|ies)|services?|solutions?|industries|associates|co|company|corporation|centre|center|shop|point|world|house|zone|hub|india|pvt|ltd|llp|bank|payments?|technologies)\b/;
+
+/** Personal UPI handles (@okaxis, @ybl…) vs merchant QR codes. */
+const PERSONAL_VPA = /@(?:ok(?:axis|sbi|icici|hdfcbank)|ybl|ibl|axl|apl|upi|paytm)$/i;
+
+export interface NameInference {
+  category: string;
+  reason: string;
+}
+
+/**
+ * Guesses a category from a payee name for payments the parser couldn't place.
+ * Conservative: returns undefined when the name gives no real signal.
+ */
+export function inferCategoryFromName(name: string | undefined, raw: string | undefined): NameInference | undefined {
+  if (!name || KNOWN_NAMES.has(name)) return undefined;
+  const n = name.toLowerCase();
+  const hint = (category: string) => ({ category, reason: `“${name}” looks like a ${category.toLowerCase()} business` });
+  for (const [category, re] of NAME_HINTS) if (re.test(n)) return hint(category);
+  // glued VPA handles: "srilakshmistores", "annapoornahotel"
+  const compact = n.replace(/[^a-z]/g, '');
+  for (const [category, re] of GLUED_HINTS) if (re.test(compact)) return hint(category);
+  if (BUSINESS.test(n) || /(?:enterprises?|traders|agency|services)$/.test(compact)) return undefined;
+
+  if (/^UPI ••\d+$/.test(name)) return { category: 'People', reason: 'UPI payment to a phone number' };
+  const personalVpa = !!raw && raw.includes('@') && PERSONAL_VPA.test(raw) && !/\d{3,}/.test(raw.split('@')[0]);
+  // 1–3 purely alphabetic words, e.g. "Rahul Kumar", "Priya S", "Anand R"
+  const words = name.split(/\s+/);
+  const personShape = words.length >= 2 && words.length <= 3 && words.every((w) => /^[a-z]{1,15}\.?$/i.test(w)) && words.some((w) => w.length >= 3);
+  const fromUpiName = !!raw && !raw.includes('@');
+  if (personShape && (personalVpa || fromUpiName)) return { category: 'People', reason: 'Looks like a payment to a person' };
+  return undefined;
 }
