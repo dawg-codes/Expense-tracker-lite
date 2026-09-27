@@ -29,7 +29,8 @@ import { More, type MoreSheet } from './components/More';
 import { PeriodBar } from './components/PeriodBar';
 import { Review } from './components/Review';
 import { KIND_META, TxnDetail } from './components/txn';
-import { Empty, Icon, Sheet, type IconName } from './components/ui';
+import { BottomNav, TABS } from './components/BottomNav';
+import { Empty, Icon, Sheet } from './components/ui';
 
 interface SmsReader {
   requestPermissions?: () => Promise<Record<string, string>>;
@@ -56,6 +57,14 @@ function initialPeriod(stored: unknown): Period {
   return { mode: migrateFilter(readJSON(KEYS.legacyFilter)), offset: 0 };
 }
 
+/** "Synced 5:01 pm" today, "Synced 26 Sept" otherwise. */
+function syncedLabel(at: number | null): string {
+  if (!at) return 'Private · on-device only';
+  const d = new Date(at);
+  const today = new Date().toDateString() === d.toDateString();
+  return `Synced ${today ? d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }) : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`;
+}
+
 const cspBlocksNetwork = () =>
   !!document.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content')?.includes("default-src 'self'");
 
@@ -71,13 +80,7 @@ interface SyncError {
   message: string;
 }
 
-const TABS: Array<[Tab, string, IconName]> = [
-  ['home', 'Home', 'home'],
-  ['activity', 'Activity', 'list'],
-  ['insights', 'Insights', 'chart'],
-  ['review', 'Review', 'inbox'],
-  ['more', 'More', 'more'],
-];
+
 
 /* ---------- app ---------- */
 
@@ -490,10 +493,10 @@ export default function App() {
                   layout
                   className={`toast ${t.type}`}
                   role={t.type === 'error' ? 'alert' : 'status'}
-                  initial={{ opacity: 0, y: -18, scale: 0.96 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -10, scale: 0.96 }}
-                  transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                  initial={{ opacity: 0, y: -12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
                 >
                   <Icon name={t.type === 'error' ? 'alert' : t.type === 'success' ? 'check' : 'info'} size={16} />
                   <span className="toast-msg">{t.message}</span>
@@ -516,35 +519,25 @@ export default function App() {
           <header className="header">
             <div>
               <h1>{tab === 'home' ? 'Expenses' : TABS.find(([t]) => t === tab)?.[1]}</h1>
-              <p className="muted small">
-                {lastSync
-                  ? `Synced ${new Date(lastSync).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}`
-                  : 'Private · on-device only'}
-              </p>
+              <p className="muted">{loading ? 'Reading your SMS…' : syncedLabel(lastSync)}</p>
             </div>
             <div className="header-actions">
-              {hasData && tab !== 'home' && (
-                <motion.button className="icon-btn" onClick={syncSms} disabled={loading} aria-label="Sync new messages" whileTap={{ scale: 0.9 }}>
-                  <Icon name="sync" className={loading ? 'spin' : ''} />
+              {hasData && (
+                <motion.button className="sync-btn" onClick={syncSms} disabled={loading} whileTap={{ scale: 0.96 }} aria-label="Sync new messages">
+                  <Icon name="sync" size={15} className={loading ? 'spin' : ''} />
+                  Sync
                 </motion.button>
               )}
               <motion.button
                 className="icon-btn"
                 onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                aria-label="Toggle theme"
-                whileTap={{ scale: 0.9, rotate: 20 }}
+                aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                whileTap={{ scale: 0.92 }}
               >
-                <Icon name={theme === 'dark' ? 'sun' : 'moon'} />
+                <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={19} />
               </motion.button>
             </div>
           </header>
-
-          {tab === 'home' && (
-            <motion.button className="btn-primary" onClick={syncSms} disabled={loading} whileTap={{ scale: 0.97 }}>
-              <Icon name="sync" className={loading ? 'spin' : ''} />
-              {loading ? 'Reading your SMS…' : hasData ? 'Sync new messages' : 'Sync banking SMS'}
-            </motion.button>
-          )}
 
           <AnimatePresence>
             {error && (
@@ -575,13 +568,17 @@ export default function App() {
             </div>
           ) : !hasData && tab !== 'more' ? (
             <Empty emoji="📭" title="No transactions yet">
-              Tap “Sync banking SMS” and I’ll turn your bank alerts into a clean spending summary. Nothing ever leaves your phone.
+              Sync your banking SMS and I’ll turn your bank alerts into a clean spending summary. Nothing ever leaves your phone.
+              <button className="btn-primary" onClick={syncSms} disabled={loading}>
+                <Icon name="sync" className={loading ? 'spin' : ''} />
+                {loading ? 'Reading your SMS…' : 'Sync banking SMS'}
+              </button>
             </Empty>
           ) : (
-            <motion.main key={tab} className="tab-body" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
-              {tab === 'home' && <Home data={periodData} onEditBudgets={() => (setTab('more'), setMoreSheet('budgets'))} />}
+            <motion.main key={tab} className="tab-body" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.18 }}>
+              {tab === 'home' && <Home data={periodData} />}
               {tab === 'activity' && <Activity base={periodData.list} all={analysis.all} filter={filter} setFilter={setFilter} />}
-              {tab === 'insights' && <Insights data={periodData} all={analysis.all} />}
+              {tab === 'insights' && <Insights data={periodData} all={analysis.all} onEditBudgets={() => (setTab('more'), setMoreSheet('budgets'))} />}
               {tab === 'review' && <Review />}
               {tab === 'more' && (
                 <More
@@ -600,17 +597,7 @@ export default function App() {
             </motion.main>
           )}
 
-          <nav className="tabbar" aria-label="Sections">
-            {TABS.map(([t, label, icon]) => (
-              <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)} aria-current={tab === t ? 'page' : undefined}>
-                <span className="tab-icon">
-                  <Icon name={icon} size={20} />
-                  {t === 'review' && reviewCount > 0 && <span className="badge">{reviewCount > 99 ? '99+' : reviewCount}</span>}
-                </span>
-                <span>{label}</span>
-              </button>
-            ))}
-          </nav>
+          <BottomNav tab={tab} onChange={setTab} reviewCount={reviewCount} />
 
           <Sheet open={!!detailId} onClose={() => setDetailId(null)} title="Transaction">
             {detailId && <TxnDetail key={detailId} id={detailId} onClose={() => setDetailId(null)} />}

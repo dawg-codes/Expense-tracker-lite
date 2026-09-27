@@ -144,3 +144,48 @@ export function categoryChanges(current: Summary, previous: Summary, limit = 5):
     .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
     .slice(0, limit);
 }
+
+/* ---------- headline insights (Home) ---------- */
+
+export interface Headline {
+  /** Plain-text sentence; `strong` marks the part worth emphasising. */
+  text: string;
+  strong?: string;
+}
+
+/**
+ * At most `max` short observations for the Home screen, most useful first.
+ * `scope` is a phrase like "today" / "this month" / "in this period".
+ */
+export function headlineInsights(
+  s: Summary,
+  opts: { scope: string; compare?: { label: string; spent: number }; recurringMonthly?: number; categoryLabel: (id: string) => string },
+  max = 2,
+): Headline[] {
+  const out: Headline[] = [];
+  const fmt = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n);
+  const catTotal = s.byCategory.reduce((a, [, x]) => a + x, 0);
+
+  if (opts.compare && opts.compare.spent > 0) {
+    const d = s.spent - opts.compare.spent;
+    const pct = Math.round((Math.abs(d) / opts.compare.spent) * 100);
+    if (Math.abs(d) >= 1 && pct >= 5) {
+      const amount = fmt(Math.abs(d));
+      out.push({ text: `You spent ${amount} ${d > 0 ? 'more' : 'less'} than ${opts.compare.label}.`, strong: amount });
+    }
+  }
+  const top = s.byCategory[0];
+  if (top && catTotal > 0) {
+    const share = Math.round((top[1] / catTotal) * 100);
+    const label = opts.categoryLabel(top[0]);
+    if (share >= 25) out.push({ text: `${label} made up ${share}% of spending ${opts.scope}.`, strong: `${label}` });
+  }
+  const m = s.topMerchants[0];
+  if (m && m.amount >= 0.15 * s.spent) out.push({ text: `${m.name} was your largest merchant ${opts.scope}.`, strong: m.name });
+  if (opts.recurringMonthly && opts.recurringMonthly > 0) {
+    const amount = `${fmt(opts.recurringMonthly)}/month`;
+    out.push({ text: `Recurring commitments total ${amount}.`, strong: amount });
+  }
+  if (s.income > 0 && s.spent > s.income) out.unshift({ text: `You spent more than you received ${opts.scope}.`, strong: 'more than you received' });
+  return out.slice(0, max);
+}
