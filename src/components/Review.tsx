@@ -1,106 +1,147 @@
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import type { ReviewItem } from '../lib/analyze';
 import { catMeta } from '../lib/categories';
+import { merchantKey } from '../lib/merchants';
 import { inr } from '../lib/parser';
 import type { FlagKind, TxnView } from '../lib/types';
 import { dismissFlag, mergeUser, useApp } from './context';
-import { AmountText, displayName, txnEmoji } from './txn';
+import { AmountText, CategoryPicker, displayName, txnEmoji } from './txn';
 import { Empty, Icon, shortDate } from './ui';
 
 const GROUPS: Record<FlagKind, { emoji: string; title: string; hint: string }> = {
-  duplicate: { emoji: '⚠️', title: 'Possible duplicate', hint: 'Same amount reported by two senders a few minutes apart. It is not counted twice.' },
-  unknown_type: { emoji: '❓', title: 'Unclear transaction', hint: 'We could not tell if money went out or came in. Not counted until you choose.' },
-  transfer: { emoji: '↔️', title: 'Possible transfer', hint: 'A matching debit and credit close together. Still counted until you confirm.' },
-  refund: { emoji: '↩️', title: 'Possible refund', hint: 'Money back from a merchant you recently paid the same amount.' },
-  card_payment: { emoji: '💳', title: 'Card bill payment', hint: 'Not counted, so card purchases are not counted twice. No card spending is recorded yet.' },
-  uncategorised: { emoji: '🏷️', title: 'Unknown merchant', hint: 'Pick a category. You can make it stick for every payment to this merchant.' },
-  low_confidence: { emoji: '🧐', title: 'Unusual wording', hint: 'The message was hard to read. Check the amount and type.' },
+  duplicate: { emoji: '⚠️', title: 'Possible duplicate', hint: 'Two different senders reported the same amount minutes apart. Only one is counted.' },
+  unknown_type: { emoji: '❓', title: 'Unclear transaction', hint: "The alert doesn't say whether money went out or came in. Not counted until you choose." },
+  transfer: { emoji: '↔️', title: 'Possible transfer', hint: 'Might be money moved between your own accounts. Still counted as spending until you confirm.' },
+  refund: { emoji: '↩️', title: 'Possible refund', hint: 'Money back for the exact amount of a recent payment to the same payee.' },
+  card_payment: { emoji: '💳', title: 'Card bill payment', hint: 'Not counted as spending, but no card purchases have been recorded for this card.' },
+  uncategorised: { emoji: '🏷️', title: 'Needs category', hint: 'Payees we could not place. Choose once and every payment to them (past and future) follows.' },
+  low_confidence: { emoji: '🧐', title: 'Unusual wording', hint: 'The alert used only abbreviations. Check that it is a real transaction.' },
 };
+const ORDER: FlagKind[] = ['uncategorised', 'duplicate', 'transfer', 'refund', 'unknown_type', 'card_payment', 'low_confidence'];
+const QUICK_CATS = ['Groceries', 'Food', 'Shopping', 'People', 'Transport', 'Bills', 'Home', 'Health', 'Family'];
 
-const QUICK_CATS = ['Food', 'Groceries', 'Shopping', 'Transport', 'Bills', 'Home', 'Health', 'Family', 'Other'];
+/* ---------- one payee, many transactions ---------- */
+
+function PayeeGroup({ items }: { items: ReviewItem[] }) {
+  const { cats, catList, learn, decide, openTxn } = useApp();
+  const [more, setMore] = useState(false);
+  const [open, setOpen] = useState(false);
+  const txns = items.map((i) => i.txn);
+  const sample = txns[0];
+  const ids = txns.map((t) => t.id);
+  const total = txns.reduce((a, t) => a + t.amount, 0);
+  const name = displayName(sample, cats);
+  const quick = QUICK_CATS.filter((c) => catList.some((x) => x.id === c));
+  const pick = (cat: string) => learn(ids, sample, { category: cat }, true, `${name} → ${catMeta(cats, cat).label}`);
+
+  return (
+    <motion.li className="review-card" layout="position" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: 40, transition: { duration: 0.18 } }}>
+      <div className="group-head">
+        <span className="txn-icon">🏷️</span>
+        <span className="txn-meta">
+          <strong>{name}</strong>
+          <small className="muted">
+            {txns.length} transaction{txns.length === 1 ? '' : 's'} · {inr(total)} total · {shortDate(txns[txns.length - 1].date)}–{shortDate(txns[0].date)}
+          </small>
+        </span>
+        <button className="icon-btn small" onClick={() => setOpen(!open)} aria-expanded={open} aria-label="Show transactions">
+          <Icon name={open ? 'x' : 'list'} size={14} />
+        </button>
+      </div>
+      {open && (
+        <ul className="group-list">
+          {txns.slice(0, 20).map((t) => (
+            <li key={t.id}>
+              <button className="link" onClick={() => openTxn(t.id)}>
+                {shortDate(t.date)} · {inr(t.amount, true)}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="small muted">Categorise all as:</p>
+      <div className="chip-row wrap">
+        {quick.map((c) => (
+          <button key={c} className="pill" onClick={() => pick(c)}>
+            {catMeta(cats, c).emoji} {catMeta(cats, c).label}
+          </button>
+        ))}
+        <button className="pill" onClick={() => setMore(!more)}>
+          More…
+        </button>
+      </div>
+      {more && <CategoryPicker onPick={pick} />}
+      <div className="review-actions">
+        <button
+          className="btn-small ghost"
+          onClick={() => decide(ids, (p) => mergeUser(dismissFlag(p, 'uncategorised'), { reviewed: true }), `${name}: kept as Other`)}
+        >
+          Keep as Other
+        </button>
+        <button className="btn-small ghost" onClick={() => decide(ids, (p) => mergeUser(p, { excluded: true }), `${name}: excluded`)}>
+          🚫 Exclude
+        </button>
+      </div>
+    </motion.li>
+  );
+}
+
+/* ---------- single ambiguous transaction ---------- */
 
 function ReviewCard({ item }: { item: ReviewItem }) {
-  const { analysis, cats, catList, decide, saveRule, openTxn, maskIncome } = useApp();
-  const [always, setAlways] = useState(false);
+  const { analysis, cats, decide, learn, openTxn, maskIncome } = useApp();
   const v = item.txn;
   const related = item.flag.relatedId ? analysis.byId.get(item.flag.relatedId) : undefined;
   const one = (patch: Parameters<typeof decide>[1], label: string) => decide([v.id], patch, label);
-  const both = (patch: Parameters<typeof decide>[1], label: string) => decide(related ? [v.id, related.id] : [v.id], patch, label);
-  const quick = QUICK_CATS.filter((c) => catList.some((x) => x.id === c));
+  const pair = related ? [v.id, related.id] : [v.id];
 
-  const pickCategory = (cat: string) => {
-    one((p) => mergeUser(p, { category: cat, reviewed: true }), `${catMeta(cats, cat).label}: ${displayName(v, cats)}`);
-    if (always && (v.merchant || v.merchantRaw)) {
-      saveRule({ id: `r_${Date.now().toString(36)}`, match: v.merchant ?? v.merchantRaw ?? v.name, category: cat });
-    }
-  };
-
-  let actions: ReactNode;
+  let confirm: ReactNode;
+  let alt: ReactNode;
   switch (item.flag.kind) {
     case 'duplicate':
-      actions = (
-        <>
-          <button className="btn-small" onClick={() => one((p) => mergeUser(dismissFlag(p, 'duplicate'), { reviewed: true }), 'Kept as duplicate')}>
-            ✓ Yes, duplicate
-          </button>
-          <button className="btn-small ghost" onClick={() => one((p) => mergeUser(dismissFlag(p, 'duplicate'), { notDuplicate: true }), 'Counted as a separate payment')}>
-            No, count it
-          </button>
-        </>
+      confirm = (
+        <button className="btn-small" onClick={() => one((p) => mergeUser(dismissFlag(p, 'duplicate'), { reviewed: true }), 'Confirmed duplicate')}>
+          ✓ Confirm duplicate
+        </button>
+      );
+      alt = (
+        <button className="btn-small ghost" onClick={() => one((p) => mergeUser(dismissFlag(p, 'duplicate'), { notDuplicate: true }), 'Counted as a separate payment')}>
+          Not a duplicate
+        </button>
       );
       break;
     case 'transfer':
-      actions = (
-        <>
-          <button
-            className="btn-small"
-            onClick={() =>
-              related &&
-              decide(
-                [v.id, related.id],
-                (p) => mergeUser(p, { type: 'transfer', reviewed: true }),
-                'Marked as internal transfer',
-              )
-            }
-          >
-            ↔️ Mark transfer
-          </button>
-          <button className="btn-small ghost" onClick={() => both((p) => dismissFlag(p, 'transfer'), 'Not a transfer')}>
-            Not a transfer
-          </button>
-        </>
+      confirm = (
+        <button
+          className="btn-small"
+          onClick={() =>
+            decide(pair, (p) => mergeUser(dismissFlag(p, 'transfer'), { type: 'transfer', reviewed: true }), 'Marked as own-account transfer')
+          }
+        >
+          ✓ It's a transfer
+        </button>
+      );
+      alt = (
+        <button className="btn-small ghost" onClick={() => decide(pair, (p) => mergeUser(dismissFlag(p, 'transfer'), { reviewed: true }), 'Not a transfer')}>
+          Not a transfer
+        </button>
       );
       break;
     case 'refund':
-      actions = (
-        <>
-          <button
-            className="btn-small"
-            onClick={() => one((p) => mergeUser(p, { type: 'refund', reviewed: true, linkedId: related?.id }), 'Marked as refund')}
-          >
-            ↩️ Mark refund
-          </button>
-          <button className="btn-small ghost" onClick={() => one((p) => dismissFlag(p, 'refund'), 'Kept as income')}>
-            It's income
-          </button>
-        </>
+      confirm = (
+        <button className="btn-small" onClick={() => learn([v.id], v, { type: 'refund' }, true, 'Marked as refund')}>
+          ✓ It's a refund
+        </button>
       );
-      break;
-    case 'card_payment':
-      actions = (
-        <>
-          <button className="btn-small" onClick={() => one((p) => mergeUser(dismissFlag(p, 'card_payment'), { reviewed: true }), 'Card payment kept out of spending')}>
-            ✓ Keep excluded
-          </button>
-          <button className="btn-small ghost" onClick={() => one((p) => mergeUser(p, { type: 'expense', reviewed: true }), 'Card payment counted as spending')}>
-            Count as expense
-          </button>
-        </>
+      alt = (
+        <button className="btn-small ghost" onClick={() => one((p) => mergeUser(dismissFlag(p, 'refund'), { reviewed: true }), 'Kept as income')}>
+          It's income
+        </button>
       );
       break;
     case 'unknown_type':
-      actions = (
+      confirm = (
         <>
           <button className="btn-small" onClick={() => one((p) => mergeUser(p, { type: 'expense', reviewed: true }), 'Marked as expense')}>
             💸 Expense
@@ -108,55 +149,25 @@ function ReviewCard({ item }: { item: ReviewItem }) {
           <button className="btn-small ghost" onClick={() => one((p) => mergeUser(p, { type: 'income', reviewed: true }), 'Marked as income')}>
             ⬇️ Income
           </button>
-          <button className="btn-small ghost" onClick={() => one((p) => mergeUser(p, { type: 'transfer', reviewed: true }), 'Marked as transfer')}>
-            ↔️ Transfer
-          </button>
         </>
       );
-      break;
-    case 'uncategorised':
-      actions = (
-        <div className="review-cats">
-          <div className="chip-row wrap">
-            {quick.map((c) => (
-              <button key={c} className="pill" onClick={() => pickCategory(c)}>
-                {catMeta(cats, c).emoji} {catMeta(cats, c).label}
-              </button>
-            ))}
-            <button className="pill" onClick={() => openTxn(v.id)}>
-              More…
-            </button>
-          </div>
-          {(v.merchant || v.merchantRaw) && (
-            <label className="check">
-              <input type="checkbox" checked={always} onChange={(e) => setAlways(e.target.checked)} />
-              Always use this category for “{displayName(v, cats)}”
-            </label>
-          )}
-        </div>
+      alt = (
+        <button className="btn-small ghost" onClick={() => one((p) => mergeUser(p, { type: 'transfer', reviewed: true }), 'Marked as transfer')}>
+          ↔️ Transfer
+        </button>
       );
       break;
     default:
-      actions = (
-        <>
-          <button className="btn-small" onClick={() => one((p) => mergeUser(p, { reviewed: true }), 'Confirmed')}>
-            ✓ Looks right
-          </button>
-          <button className="btn-small ghost" onClick={() => openTxn(v.id)}>
-            Edit
-          </button>
-        </>
+      confirm = (
+        <button className="btn-small" onClick={() => one((p) => mergeUser(p, { reviewed: true }), 'Confirmed')}>
+          ✓ Confirm
+        </button>
       );
+      alt = null;
   }
 
   return (
-    <motion.li
-      className="review-card"
-      layout="position"
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, x: 40, transition: { duration: 0.18 } }}
-    >
+    <motion.li className="review-card" layout="position" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: 40, transition: { duration: 0.18 } }}>
       <button className="txn-row" onClick={() => openTxn(v.id)}>
         <span className="txn-icon" style={{ background: `${catMeta(cats, v.cat).color}22` }}>
           {txnEmoji(v, cats)}
@@ -170,16 +181,20 @@ function ReviewCard({ item }: { item: ReviewItem }) {
         </span>
         <AmountText v={v} mask={maskIncome} />
       </button>
-      {related && (
+      {(related || item.flag.note) && (
         <p className="muted small related">
-          {item.flag.kind === 'duplicate' ? 'Same as' : item.flag.kind === 'refund' ? 'Matches purchase' : 'Pairs with'}{' '}
-          {related.direction === 'debit' ? '−' : '+'}
-          {inr(related.amount, true)} · {displayName(related, cats)} · {related.sender} · {shortDate(related.date)}
+          {related
+            ? `${item.flag.kind === 'duplicate' ? 'Same as' : item.flag.kind === 'refund' ? 'Matches payment' : 'Pairs with'} ${related.direction === 'debit' ? '−' : '+'}${inr(related.amount, true)} · ${displayName(related, cats)} · ${related.sender} · ${shortDate(related.date)}`
+            : item.flag.note}
         </p>
       )}
       <div className="review-actions">
-        {actions}
-        <button className="btn-small ghost" onClick={() => one((p) => mergeUser(p, { excluded: true }), 'Excluded from totals')} aria-label="Exclude">
+        {confirm}
+        {alt}
+        <button className="btn-small ghost" onClick={() => openTxn(v.id)}>
+          Change
+        </button>
+        <button className="btn-small ghost" onClick={() => one((p) => mergeUser(p, { excluded: true }), 'Excluded from totals')}>
           🚫 Exclude
         </button>
       </div>
@@ -187,64 +202,131 @@ function ReviewCard({ item }: { item: ReviewItem }) {
   );
 }
 
-export function Review() {
-  const { analysis, decisions, undo, cats, decide, maskIncome, openTxn } = useApp();
-  const [showDupes, setShowDupes] = useState(false);
-  const [limit, setLimit] = useState(40);
-  const items = analysis.review;
-  const groups = new Map<FlagKind, ReviewItem[]>();
-  for (const it of items.slice(0, limit)) {
-    const list = groups.get(it.flag.kind) ?? [];
-    list.push(it);
-    groups.set(it.flag.kind, list);
+/* ---------- bulk confirm per section ---------- */
+
+function bulkConfirm(kind: FlagKind, items: ReviewItem[]): { label: string; ids: string[]; patch: Parameters<ReturnType<typeof useApp>['decide']>[1] } | null {
+  const ids = items.map((i) => i.txn.id);
+  switch (kind) {
+    case 'duplicate':
+      return { label: `Confirm all ${ids.length} duplicates`, ids, patch: (p) => mergeUser(dismissFlag(p, 'duplicate'), { reviewed: true }) };
+    case 'card_payment':
+      return { label: `Keep all ${ids.length} out of spending`, ids, patch: (p) => mergeUser(dismissFlag(p, 'card_payment'), { reviewed: true }) };
+    case 'transfer': {
+      const all = [...new Set(items.flatMap((i) => [i.txn.id, i.flag.relatedId].filter((x): x is string => !!x)))];
+      return { label: `Mark all as transfers`, ids: all, patch: (p) => mergeUser(dismissFlag(p, 'transfer'), { type: 'transfer', reviewed: true }) };
+    }
+    case 'refund':
+      return { label: `Mark all ${ids.length} as refunds`, ids, patch: (p) => mergeUser(dismissFlag(p, 'refund'), { type: 'refund', reviewed: true }) };
+    case 'low_confidence':
+      return { label: `Confirm all ${ids.length}`, ids, patch: (p) => mergeUser(p, { reviewed: true }) };
+    default:
+      return null;
   }
-  const uncategorised = items.filter((i) => i.flag.kind === 'uncategorised');
+}
+
+/* ---------- screen ---------- */
+
+export function Review() {
+  const { analysis, decisions, undo, cats, decide, maskIncome, openTxn, go } = useApp();
+  const [showDupes, setShowDupes] = useState(false);
+  const items = analysis.review;
+  const st = analysis.stats;
+
+  const sections = useMemo(() => {
+    const byKind = new Map<FlagKind, ReviewItem[]>();
+    for (const it of items) {
+      const l = byKind.get(it.flag.kind) ?? [];
+      l.push(it);
+      byKind.set(it.flag.kind, l);
+    }
+    return ORDER.filter((k) => byKind.has(k)).map((kind) => {
+      const list = byKind.get(kind)!;
+      // group by payee so one decision resolves them all
+      const payees = new Map<string, ReviewItem[]>();
+      if (kind === 'uncategorised') {
+        for (const it of list) {
+          const k = merchantKey(it.txn.name) ?? it.txn.id;
+          const g = payees.get(k) ?? [];
+          g.push(it);
+          payees.set(k, g);
+        }
+      }
+      return { kind, list, payees: [...payees.values()].sort((a, b) => b.length - a.length) };
+    });
+  }, [items]);
+  const decisionsNeeded = sections.reduce((a, s) => a + (s.kind === 'uncategorised' ? s.payees.length : s.list.length), 0);
 
   return (
     <>
       <section className="card hero">
         <span className="label">🧐 Review</span>
         <h2 className="review-count">
-          {items.length === 0 ? 'All clear' : `${items.length} transaction${items.length === 1 ? '' : 's'} need${items.length === 1 ? 's' : ''} your attention`}
+          {items.length === 0 ? 'Nothing needs you' : `${items.length} transaction${items.length === 1 ? '' : 's'} need${items.length === 1 ? 's' : ''} your attention`}
         </h2>
+        {items.length > 0 && decisionsNeeded < items.length && (
+          <p className="small">
+            <b>
+              {decisionsNeeded} decision{decisionsNeeded === 1 ? '' : 's'}
+            </b>{' '}
+            will clear them all.
+          </p>
+        )}
         <p className="muted small">
-          Uncertain results are never hidden. Anything we're unsure about lands here, and your decisions always override automatic detection.
+          ✓ {st.resolved.toLocaleString('en-IN')} handled automatically. Only genuinely ambiguous cases land here, and your choices teach the app for next time.
         </p>
+        <div className="chip-row wrap auto-chips">
+          {st.categorised > 0 && (
+            <button className="pill" onClick={() => go('activity', { allTime: true, kinds: ['expense'] })}>
+              🏷️ {st.categorised} categorised
+            </button>
+          )}
+          {st.duplicates > 0 && (
+            <button className="pill" onClick={() => setShowDupes(true)}>
+              🔁 {st.duplicates} duplicates
+            </button>
+          )}
+          {st.transfers > 0 && (
+            <button className="pill" onClick={() => go('activity', { allTime: true, kinds: ['transfer'] })}>
+              ↔️ {st.transfers} transfers
+            </button>
+          )}
+          {st.refunds > 0 && (
+            <button className="pill" onClick={() => go('activity', { allTime: true, kinds: ['refund'] })}>
+              ↩️ {st.refunds} refunds
+            </button>
+          )}
+          {st.cardPayments > 0 && <span className="pill static">💳 {st.cardPayments} card bills</span>}
+        </div>
       </section>
 
-      {items.length === 0 && decisions.length === 0 && <Empty emoji="✨" title="Nothing to review">New questions appear here after each sync.</Empty>}
+      {items.length === 0 && decisions.length === 0 && <Empty emoji="✨" title="All clear">New questions appear here only when the app genuinely can't decide.</Empty>}
 
-      {[...groups].map(([kind, list]) => (
-        <section className="card" key={kind}>
-          <div className="row-between">
-            <h2 className="section-title">
-              {GROUPS[kind].emoji} {GROUPS[kind].title} <span className="count">{items.filter((i) => i.flag.kind === kind).length}</span>
-            </h2>
-            {kind === 'uncategorised' && uncategorised.length > 3 && (
-              <button
-                className="link"
-                onClick={() => decide(uncategorised.map((i) => i.txn.id), (p) => mergeUser(p, { reviewed: true }), `${uncategorised.length} kept as Other`)}
-              >
-                Keep all as Other
-              </button>
-            )}
-          </div>
-          <p className="muted small group-hint">{GROUPS[kind].hint}</p>
-          <ul className="review-list">
-            <AnimatePresence initial={false}>
-              {list.map((it) => (
-                <ReviewCard key={it.txn.id} item={it} />
-              ))}
-            </AnimatePresence>
-          </ul>
-        </section>
-      ))}
-
-      {items.length > limit && (
-        <button className="link center-btn" onClick={() => setLimit(limit + 40)}>
-          Show more ({items.length - limit} left)
-        </button>
-      )}
+      {sections.map(({ kind, list, payees }) => {
+        const bulk = bulkConfirm(kind, list);
+        return (
+          <section className="card" key={kind}>
+            <div className="row-between">
+              <h2 className="section-title">
+                {GROUPS[kind].emoji} {GROUPS[kind].title} <span className="count">{list.length}</span>
+              </h2>
+              {bulk && list.length > 1 && (
+                <button className="link" onClick={() => decide(bulk.ids, bulk.patch, `${GROUPS[kind].title}: ${bulk.ids.length} resolved`)}>
+                  {bulk.label}
+                </button>
+              )}
+            </div>
+            <p className="muted small group-hint">{GROUPS[kind].hint}</p>
+            <ul className="review-list">
+              <AnimatePresence initial={false}>
+                {kind === 'uncategorised'
+                  ? payees.map((g) => <PayeeGroup key={g[0].txn.id} items={g} />)
+                  : list.slice(0, 30).map((it) => <ReviewCard key={it.txn.id} item={it} />)}
+              </AnimatePresence>
+            </ul>
+            {kind !== 'uncategorised' && list.length > 30 && <p className="muted small center">{list.length - 30} more after these</p>}
+          </section>
+        );
+      })}
 
       {decisions.length > 0 && (
         <section className="card">
@@ -255,11 +337,13 @@ export function Review() {
                 <span className="txn-meta">
                   <strong>{d.label}</strong>
                   <small className="muted">
-                    {d.txnIds
-                      .map((id) => analysis.byId.get(id))
-                      .filter((x): x is TxnView => !!x)
-                      .map((x) => `${inr(x.amount)} · ${displayName(x, cats)}`)
-                      .join(', ')}
+                    {d.txnIds.length > 3
+                      ? `${d.txnIds.length} transactions`
+                      : d.txnIds
+                          .map((id) => analysis.byId.get(id))
+                          .filter((x): x is TxnView => !!x)
+                          .map((x) => `${inr(x.amount)} · ${displayName(x, cats)}`)
+                          .join(', ')}
                   </small>
                 </span>
                 <button className="btn-small ghost" onClick={() => undo(d.id)}>
@@ -294,10 +378,7 @@ export function Review() {
                     </span>
                     <AmountText v={v} mask={maskIncome} />
                   </button>
-                  <button
-                    className="btn-small ghost"
-                    onClick={() => decide([v.id], (p) => mergeUser(p, { notDuplicate: true }), 'Counted as a separate payment')}
-                  >
+                  <button className="btn-small ghost" onClick={() => decide([v.id], (p) => mergeUser(p, { notDuplicate: true }), 'Counted as a separate payment')}>
                     Count it
                   </button>
                 </li>

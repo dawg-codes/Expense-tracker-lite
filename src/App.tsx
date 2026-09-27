@@ -6,7 +6,8 @@ import { BUILTIN_CATEGORIES, buildCategoryMap, catMeta } from './lib/categories'
 import { migrateFilter, periodHint, periodRange, previousPeriod, type Period, type Range } from './lib/dates';
 import { buildBackup, mergeBackup, saveFile, stamp, toCSV, type BackupData, type BackupFile } from './lib/exporter';
 import { inRange, summarize } from './lib/insights';
-import { dedupe, parseSms } from './lib/parser';
+import { learnedRule, ruleMatches, summarizeSync, upsertRule, type SyncSummary } from './lib/learning';
+import { parseSms } from './lib/parser';
 import {
   KEYS,
   countStoredMessageText,
@@ -19,15 +20,15 @@ import {
   storageBytes,
   writeJSON,
 } from './lib/storage';
-import type { Budgets, CategoryDef, MerchantRule, RawSms, Txn, TxnOverrides } from './lib/types';
+import type { Budgets, CategoryDef, MerchantRule, RawSms, Txn, TxnOverrides, TxnType, TxnView } from './lib/types';
 import { Activity } from './components/Activity';
-import { Ctx, EMPTY_FILTER, type ActivityFilter, type AppCtx, type Decision, type OverridePatch, type Tab, type ToastAction } from './components/context';
+import { Ctx, EMPTY_FILTER, dismissFlag, mergeUser, type ActivityFilter, type AppCtx, type Decision, type OverridePatch, type Tab, type ToastAction } from './components/context';
 import { Home, type PeriodData } from './components/Home';
 import { Insights } from './components/Insights';
 import { More, type MoreSheet } from './components/More';
 import { PeriodBar } from './components/PeriodBar';
 import { Review } from './components/Review';
-import { TxnDetail } from './components/txn';
+import { KIND_META, TxnDetail } from './components/txn';
 import { Empty, Icon, Sheet, type IconName } from './components/ui';
 
 interface SmsReader {
@@ -109,7 +110,8 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<SyncError | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [decisions, setDecisions] = useState<Array<Decision & { prev: Map<string, TxnOverrides | undefined> }>>([]);
+  const [decisions, setDecisions] = useState<Array<Decision & { prev: Map<string, TxnOverrides | undefined>; prevRules?: MerchantRule[] }>>([]);
+  const [syncSummary, setSyncSummary] = useState<SyncSummary | null>(null);
   const toastId = useRef(0);
 
   useEffect(() => {
@@ -177,14 +179,15 @@ export default function App() {
       const d = decisions.find((x) => x.id === decisionId);
       if (!d) return;
       applyUser(d.prev);
+      if (d.prevRules) setRules(d.prevRules);
       setDecisions((list) => list.filter((x) => x.id !== decisionId));
       toast('Undone', 'info');
     },
-    [decisions, applyUser, toast],
+    [decisions, applyUser, toast, setRules],
   );
 
   const decide = useCallback(
-    (ids: string[], patch: OverridePatch, label: string) => {
+    (ids: string[], patch: OverridePatch, label: string, nextRules?: MerchantRule[]) => {
       const prev = new Map<string, TxnOverrides | undefined>();
       const next = new Map<string, TxnOverrides | undefined>();
       for (const t of txns) {
@@ -194,8 +197,10 @@ export default function App() {
       }
       if (!prev.size) return;
       applyUser(next);
+      const prevRules = nextRules ? rules : undefined;
+      if (nextRules) setRules(nextRules);
       const id = ++toastId.current;
-      setDecisions((list) => [{ id, label, txnIds: ids, prev }, ...list].slice(0, 30));
+      setDecisions((list) => [{ id, label, txnIds: ids, prev, prevRules }, ...list].slice(0, 30));
       const tid = ++toastId.current;
       setToasts((t) => [
         ...t.slice(-2),
@@ -207,6 +212,7 @@ export default function App() {
             label: 'Undo',
             run: () => {
               applyUser(prev);
+              if (prevRules) setRules(prevRules);
               setDecisions((list) => list.filter((x) => x.id !== id));
             },
           },
@@ -214,7 +220,29 @@ export default function App() {
       ]);
       window.setTimeout(() => dismissToast(tid), 5000);
     },
-    [txns, applyUser, dismissToast],
+    [txns, rules, setRules, applyUser, dismissToast],
+  );
+
+  /**
+   * A correction that also teaches a local rule, so every other payment to the
+   * same payee (past and future) is handled the same way.
+   */
+  const learn = useCallback(
+    (ids: string[], sample: TxnView, change: { category?: string; type?: TxnType }, applyToAll: boolean, label: string) => {
+      const rule = applyToAll ? learnedRule(sample, change) : undefined;
+      const nextRules = rule ? upsertRule(rules, rule) : undefined;
+      // payments the rule will actually change: not already chosen by hand
+      const byHand = new Set(txns.filter((t) => (change.category ? t.user?.category : t.user?.type)).map((t) => t.id));
+      const others = rule ? ruleMatches(rule, txns).filter((id) => !ids.includes(id) && !byHand.has(id)).length : 0;
+      const patch: OverridePatch = (p) =>
+        mergeUser(change.type === 'transfer' || change.type === 'refund' ? dismissFlag(p, change.type) : p, {
+          ...(change.category ? { category: change.category } : {}),
+          ...(change.type ? { type: change.type } : {}),
+          reviewed: true,
+        });
+      decide(ids, patch, others > 0 ? `${label} · also ${others} more from ${rule!.match}` : label, nextRules);
+    },
+    [rules, txns, decide],
   );
 
   const saveRule = useCallback(
@@ -223,7 +251,8 @@ export default function App() {
         const i = list.findIndex((r) => r.id === rule.id);
         return i >= 0 ? list.map((r) => (r.id === rule.id ? rule : r)) : [...list, rule];
       });
-      toast(`Rule saved: “${rule.match}” → ${catMeta(cats, rule.category).label}`, 'success');
+      const what = rule.category ? catMeta(cats, rule.category).label : rule.type ? KIND_META[rule.type].label : '';
+      toast(`Rule saved: “${rule.match}” → ${what}`, 'success');
     },
     [setRules, toast, cats],
   );
@@ -312,13 +341,16 @@ export default function App() {
         merged.set(t.id, prev?.user ? { ...t, user: prev.user } : t);
       }
       const all = [...merged.values()].sort((a, b) => b.date - a.date);
-      const before = dedupe(txns).unique.length;
-      const after = dedupe(all);
-      const added = after.unique.length - before;
+      const known = new Set(txns.map((t) => t.id));
+      const newIds = parsed.filter((t) => !known.has(t.id)).map((t) => t.id);
+      const summary = summarizeSync(analyze(all, rules, cats, dismissedRecurring), newIds);
       setTxns(all);
       setLastSync(Date.now());
+      setSyncSummary(summary);
       toast(
-        `${added > 0 ? `${added} new` : 'No new'} transaction${added === 1 ? '' : 's'} · ${after.dupes.length} duplicate${after.dupes.length === 1 ? '' : 's'} ignored`,
+        summary.newCount
+          ? `Synced ${summary.newCount} new transaction${summary.newCount === 1 ? '' : 's'} · ${summary.attention ? `${summary.attention} need${summary.attention === 1 ? 's' : ''} you` : 'all handled'}`
+          : 'You are up to date. No new transactions.',
         'success',
       );
     } catch (err: unknown) {
@@ -428,7 +460,10 @@ export default function App() {
     openTxn: setDetailId,
     toast,
     decide,
+    learn,
     undo,
+    syncSummary,
+    dismissSyncSummary: () => setSyncSummary(null),
     saveRule,
     deleteRule,
     saveCategory,

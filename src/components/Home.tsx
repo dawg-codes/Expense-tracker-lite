@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { motion } from 'motion/react';
 import { catMeta, type CategoryMap } from '../lib/categories';
 import { periodHint, periodTitle } from '../lib/dates';
@@ -76,47 +77,97 @@ export function Delta({ now, before, invert = false }: { now: number; before: nu
   );
 }
 
+/** "Synced 84 new transactions: 79 categorised, 3 duplicates ignored…" with tappable rows. */
+function SyncSummaryCard() {
+  const { syncSummary: s, dismissSyncSummary, go } = useApp();
+  if (!s) return null;
+  const rows: Array<[string, number, () => void]> = [
+    ['🏷️ Categorised automatically', s.categorised, () => go('activity', { allTime: true, ids: s.ids, idsLabel: 'From last sync' })],
+    ['📦 Small one-off payments kept in Other', s.otherKept, () => go('activity', { allTime: true, ids: s.ids, idsLabel: 'From last sync', category: 'Other' })],
+    ['🔁 Duplicate alerts ignored', s.duplicates, () => go('review')],
+    ['↔️ Own-account transfers excluded', s.transfers, () => go('activity', { allTime: true, ids: s.ids, idsLabel: 'From last sync', kinds: ['transfer'] })],
+    ['↩️ Refunds matched', s.refunds, () => go('activity', { allTime: true, ids: s.ids, idsLabel: 'From last sync', kinds: ['refund'] })],
+    ['💳 Card bill payments excluded', s.cardPayments, () => go('activity', { allTime: true, ids: s.ids, idsLabel: 'From last sync', kinds: ['card_payment'] })],
+  ];
+  return (
+    <motion.section className="card sync-card" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}>
+      <div className="row-between">
+        <h2 className="section-title">
+          <span className="pos">✓</span> {s.newCount ? `Synced ${s.newCount} new transaction${s.newCount === 1 ? '' : 's'}` : 'Up to date'}
+        </h2>
+        <button className="icon-btn small" onClick={dismissSyncSummary} aria-label="Dismiss sync summary">
+          <Icon name="x" size={14} />
+        </button>
+      </div>
+      <ul className="sync-rows">
+        {rows
+          .filter(([, n]) => n > 0)
+          .map(([label, n, onTap]) => (
+            <li key={label}>
+              <button onClick={onTap}>
+                <span>{label}</span>
+                <strong>{n}</strong>
+              </button>
+            </li>
+          ))}
+        <li className={s.attention ? 'attention' : ''}>
+          <button onClick={() => go('review')} disabled={!s.attention}>
+            <span>{s.attention ? '🧐 Need your attention' : '✨ Nothing needs your attention'}</span>
+            <strong>{s.attention || ''}</strong>
+          </button>
+        </li>
+      </ul>
+    </motion.section>
+  );
+}
+
 export function Home({ data, onEditBudgets }: { data: PeriodData; onEditBudgets: () => void }) {
-  const { period, cats, analysis, budgets, maskIncome, reduce, go, openTxn } = useApp();
+  const { period, cats, analysis, budgets, maskIncome, reduce, go, openTxn, syncSummary } = useApp();
   const { summary: s, list, valid } = data;
   const net = s.income - s.spent;
   const review = analysis.review.length;
-  const recent = list.slice(0, 8);
+  // duplicate alerts are already handled: keep them out of the feed
+  const recent = useMemo(() => list.filter((v) => !v.dupOf).slice(0, 8), [list]);
+  const shownCount = useMemo(() => list.filter((v) => !v.dupOf).length, [list]);
   const monthly = period.mode === 'month';
   const catTotal = s.byCategory.reduce((a, [, x]) => a + x, 0);
   const hasBudgets = !!budgets.total || Object.keys(budgets.categories).length > 0;
 
   return (
     <>
-      {review > 0 && (
+      {syncSummary && <SyncSummaryCard />}
+
+      {review > 0 ? (
         <motion.button className="card review-banner" onClick={() => go('review')} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
           <span className="review-emoji">🧐</span>
           <span>
             <strong>
               {review} transaction{review === 1 ? '' : 's'} need{review === 1 ? 's' : ''} your attention
             </strong>
-            <small className="muted">Possible duplicates, transfers, refunds and unknown merchants</small>
+            <small className="muted">{analysis.stats.resolved.toLocaleString('en-IN')} handled automatically</small>
           </span>
           <Icon name="right" />
         </motion.button>
+      ) : (
+        analysis.stats.resolved > 0 && (
+          <p className="all-handled muted small">
+            <Icon name="check" size={14} /> All {analysis.stats.resolved.toLocaleString('en-IN')} transactions handled automatically
+          </p>
+        )
       )}
 
-      {/* hero */}
+      {/* hero: spent first, then income / net / count; the fine print goes last */}
       <motion.section className="card hero" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }}>
         <div className="row-between">
-          <span className="label">{periodTitle(period)}</span>
+          <span className="label">Spent</span>
           <span className="chip">{periodHint(period)}</span>
         </div>
         <AnimatedNumber value={s.spent} className="hero-amount" />
-        <div className="hero-caption">
-          <span className="muted">spent</span>
-          {data.compare && (
-            <span className="small-note">
-              <Delta now={s.spent} before={data.compare.spent} /> <span className="muted">vs {data.compare.label}</span>
-            </span>
-          )}
-        </div>
-        {s.refunds > 0 && <p className="muted small">After {inr(s.refunds)} in refunds</p>}
+        {data.compare && (
+          <p className="hero-caption small-note">
+            <Delta now={s.spent} before={data.compare.spent} /> <span className="muted">vs {data.compare.label}</span>
+          </p>
+        )}
         <div className="hero-grid">
           <div>
             <span className="label">Income</span>
@@ -131,12 +182,15 @@ export function Home({ data, onEditBudgets }: { data: PeriodData; onEditBudgets:
             <strong>{s.count}</strong>
           </div>
         </div>
-        {s.transfers > 0 && (
-          <p className="muted small">
-            ↔️ {inr(s.transfers)} moved between your own accounts (not counted)
-          </p>
-        )}
-        <p className="muted tiny">Based on recorded bank SMS only.</p>
+        <p className="hero-foot muted">
+          {[
+            s.transfers > 0 ? `Excludes ${inr(s.transfers)} moved between your accounts` : '',
+            s.refunds > 0 ? `${inr(s.refunds)} refunds netted` : '',
+            'From your bank SMS only',
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </p>
       </motion.section>
 
       {/* budget */}
@@ -239,7 +293,7 @@ export function Home({ data, onEditBudgets }: { data: PeriodData; onEditBudgets:
           <div className="row-between">
             <h2 className="section-title">Recent activity</h2>
             <button className="link" onClick={() => go('activity')}>
-              See all {list.length}
+              See all {shownCount}
             </button>
           </div>
           <ul className="txns">
