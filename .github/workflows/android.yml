@@ -21,6 +21,9 @@ jobs:
     - name: Install Dependencies
       run: npm install
 
+    - name: Run tests
+      run: npm test
+
     - name: Build React App
       run: npm run build
 
@@ -30,6 +33,12 @@ jobs:
     - name: Inject SMS Permissions
       run: |
         sed -i 's|</manifest>|    <uses-permission android:name="android.permission.READ_SMS" />\n    <uses-permission android:name="android.permission.READ_PHONE_STATE" />\n</manifest>|' android/app/src/main/AndroidManifest.xml
+
+    # Privacy: keep transaction data out of Android's automatic cloud backup
+    - name: Disable Android auto-backup
+      run: |
+        sed -i 's|android:allowBackup="true"|android:allowBackup="false"|' android/app/src/main/AndroidManifest.xml
+        grep -q 'android:allowBackup="false"' android/app/src/main/AndroidManifest.xml
 
     - name: Sync Capacitor
       run: npx cap sync android
